@@ -1,5 +1,6 @@
 pub mod amazon;
 pub mod expedia;
+pub mod playstation;
 pub mod uber;
 pub mod zomato;
 
@@ -10,6 +11,15 @@ pub use amazon::{
     AMAZON_INTEGRATION_KEY, AMAZON_OFFICIAL_LOCALES, AmazonCatalogItem,
     AmazonCatalogSearchResponse, AmazonError, AmazonHandoffRequest, AmazonHandoffResponse,
     AmazonProviderClient, AmazonService, DefaultAmazonProviderClient, MockAmazonProviderClient,
+};
+pub use playstation::{
+    DefaultPlayStationProviderClient, MockPlayStationProviderClient,
+    PLAYSTATION_CAPABILITY_GAME_ACTIVITY, PLAYSTATION_CAPABILITY_GAME_ACTIVITY_SHORT,
+    PLAYSTATION_CAPABILITY_RECENTLY_PLAYED, PLAYSTATION_CAPABILITY_RECENTLY_PLAYED_SHORT,
+    PLAYSTATION_CAPABILITY_USER_TITLES, PLAYSTATION_CAPABILITY_USER_TITLES_SHORT,
+    PLAYSTATION_INTEGRATION_KEY, PlayStationActivityWorker, PlayStationError, PlayStationGame,
+    PlayStationProviderClient, PlayStationRecentActivityResponse, PlayStationService,
+    PlayStationSpanInput, PlayStationSyncResult,
 };
 pub use uber::{
     DefaultUberProviderClient, MockUberProviderClient, UBER_CAPABILITY_HISTORY,

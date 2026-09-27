@@ -2,7 +2,15 @@
 
 Reusable Rust connector platform for Vox Core and independent host applications. The crate owns integration declarations and discovery, account connection records, capability grants, remote extension packages, protocol adapters, connected-app OAuth and MCP sessions, declarative skill packages, provider clients, and a conformance fixture. It does not import `vox-core` or a host UI.
 
-## Modules
+Contains:
+- `connections` — OAuth/authorization connection lifecycle (initiate, callback, list, disconnect).
+- `capability_grants` — per-agent capability grant/revoke and effective-grant lookup.
+- `integration_registry` — capability declarations and per-deployment discovery.
+- `providers::{amazon, playstation, uber, zomato}` — provider clients and workers built on top of the above:
+  - `amazon` — Creators API catalog discovery and labelled purchase handoff.
+  - `playstation` — PlayStation 5 / PSN activity extraction and timeline sync worker that records gaming sessions as Spans.
+  - `uber` — Connected read trip history and estimate options.
+  - `zomato` — Restaurant search and labelled order handoff.
 
 | Module | Responsibility |
 | --- | --- |
