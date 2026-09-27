@@ -1,0 +1,44 @@
+name: Connector checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  connectors:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/vox_connectors
+    steps:
+      - uses: actions/checkout@v4
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test
+      - name: Standalone schema and integration flow
+        run: |
+          createdb -h 127.0.0.1 -U postgres vox_connectors
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f examples/independent_host_schema.sql
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema/connectors.sql
+          cargo test --test postgres_integration -- --ignored

@@ -1,4 +1,5 @@
 pub mod amazon;
+pub mod expedia;
 pub mod uber;
 pub mod zomato;
 
