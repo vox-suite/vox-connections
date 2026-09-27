@@ -1,6 +1,4 @@
-use crate::{
-    identity::{RequestContext, UserContextId},
-};
+use crate::identity::{RequestContext, UserContextId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -230,10 +228,7 @@ impl ConnectionService {
     }
 
     /// Returns only connections owned by this authenticated host user context.
-    pub async fn list(
-        &self,
-        context: &RequestContext,
-    ) -> Result<Vec<Connection>, ConnectionError> {
+    pub async fn list(&self, context: &RequestContext) -> Result<Vec<Connection>, ConnectionError> {
         let rows = sqlx::query(
             "SELECT c.id, i.external_key, c.account_display_id, c.credential_custody, c.authorization_state, \
              c.authorized_capabilities, c.expires_at, c.failure_code \

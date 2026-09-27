@@ -30,3 +30,14 @@ pub struct RequestContext {
     pub user_id: UserId,
     pub subject: RequestSubject,
 }
+
+/// Minimal identity supplied by any host using connector services.
+pub trait RequestScope {
+    fn request_context(&self) -> RequestContext;
+}
+
+impl RequestScope for RequestContext {
+    fn request_context(&self) -> RequestContext {
+        *self
+    }
+}

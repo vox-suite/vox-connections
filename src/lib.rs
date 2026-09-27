@@ -1,5 +1,9 @@
 pub mod capability_grants;
+pub mod conformance;
+pub mod connected_apps;
 pub mod connections;
 pub mod identity;
 pub mod integration_registry;
 pub mod providers;
+pub mod remote_extensions;
+pub mod skills;
