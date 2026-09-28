@@ -7,20 +7,23 @@
 * login URL. The provider redirects back to the host with a code, and
 * `complete` verifies the single-use state, exchanges the code with PKCE,
 * opens an MCP session with the new token and records the tools the server
-* reports. Only then does the extension become active for the agent.
+* reports. Operator review and an agent-specific grant are separate steps;
+* authorization alone never activates agent tool use.
 */
 use crate::{
-    identity::{RequestScope, UserId},
-    remote_extensions::{RemoteExtension, RemoteExtensionError, RemoteExtensionService},
+    identity::RequestScope,
+    remote_extensions::{
+        ExtensionCapability, RemoteExtension, RemoteExtensionError, RemoteExtensionService,
+    },
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::Row;
 use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
+    collections::{HashMap, HashSet},
     time::Duration,
 };
 use url::Url;
@@ -29,22 +32,14 @@ use uuid::Uuid;
 pub mod crypto;
 pub mod mcp;
 pub mod oauth;
-pub mod policy;
-pub mod selection;
 
 use crypto::{CredentialCipher, pkce_challenge, random_token, sha256_hex};
-use mcp::McpPool;
+use mcp::McpDiscoveryClient;
 use oauth::{ConfiguredClient, TokenRequest, TokenSet};
-use policy::classify;
 
 const SESSION_TTL_MINUTES: i64 = 10;
-const PENDING_ACTION_TTL_MINUTES: i64 = 15;
 /// Connecting lists every tool once; give slow servers room.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Refreshing an app's tool list.
-const REFRESH_TIMEOUT: Duration = Duration::from_secs(20);
-/// Tool lists older than this are refreshed in the background.
-pub const TOOLS_STALE_AFTER_HOURS: i64 = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectedAppError {
@@ -70,10 +65,12 @@ pub enum ConnectedAppError {
     Timeout,
     #[error("the app no longer has that tool")]
     UnknownTool,
+    #[error("the selected agent has no grant for this connection and tool")]
+    GrantRequired,
+    #[error("this tool changes external state and requires an approved execution")]
+    WriteRequiresApproval,
     #[error("the app session expired")]
     SessionExpired,
-    #[error("that confirmation is no longer pending")]
-    NoPendingAction,
     #[error("connected app storage unavailable")]
     Database(#[from] sqlx::Error),
 }
@@ -82,34 +79,6 @@ pub enum ConnectedAppError {
 pub struct AuthorizationStart {
     pub authorization_url: String,
     pub expires_at: DateTime<Utc>,
-}
-
-/// One connected app as the agent runtime needs it.
-#[derive(Clone, Debug)]
-pub struct ConnectedApp {
-    pub extension_id: Uuid,
-    pub app_key: String,
-    pub app_name: String,
-    pub tools: Vec<Value>,
-    pub tools_refreshed_at: DateTime<Utc>,
-    pub last_used_at: Option<DateTime<Utc>>,
-}
-
-/// An action that waits for the user to confirm it in a later turn.
-#[derive(Clone, Debug)]
-pub struct PendingAction {
-    pub id: Uuid,
-    pub extension_id: Uuid,
-    pub app_name: String,
-    pub tool_name: String,
-    pub arguments: Value,
-    pub proposed_turn: Uuid,
-}
-
-/// Decrypted, fresh credentials for one call.
-struct LiveCredentials {
-    endpoint: String,
-    access_token: String,
 }
 
 /// Deployment-supplied OAuth and credential settings, independent of the host app.
@@ -128,10 +97,7 @@ pub struct ConnectedAppsService {
     redirect_uris: Vec<String>,
     configured: HashMap<String, ConfiguredClient>,
     allow_local: bool,
-    pool: McpPool,
-    /// One token refresh at a time per app, so providers that rotate
-    /// refresh tokens never see the old one used twice.
-    refresh_locks: Arc<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>>,
+    discovery: McpDiscoveryClient,
 }
 
 impl ConnectedAppsService {
@@ -155,8 +121,7 @@ impl ConnectedAppsService {
             redirect_uris: options.redirect_uris,
             configured,
             allow_local: false,
-            pool: McpPool::default(),
-            refresh_locks: Arc::default(),
+            discovery: McpDiscoveryClient::default(),
         }
     }
 
@@ -173,8 +138,7 @@ impl ConnectedAppsService {
             redirect_uris,
             configured,
             allow_local: false,
-            pool: McpPool::default(),
-            refresh_locks: Arc::default(),
+            discovery: McpDiscoveryClient::default(),
         }
     }
 
@@ -216,7 +180,7 @@ impl ConnectedAppsService {
             return Err(ConnectedAppError::Invalid);
         }
         let row = sqlx::query(
-            "SELECT endpoint_url, protocol, lifecycle_state FROM remote_extensions \
+            "SELECT endpoint_url, protocol, lifecycle_state, current_version FROM remote_extensions \
              WHERE id = $1 AND user_context_id = $2",
         )
         .bind(extension_id)
@@ -227,6 +191,7 @@ impl ConnectedAppsService {
         let endpoint: String = row.get("endpoint_url");
         let protocol: String = row.get("protocol");
         let state: String = row.get("lifecycle_state");
+        let version: i32 = row.get("current_version");
         if protocol != "mcp" || state == "removed" || state == "quarantined" {
             return Err(ConnectedAppError::Invalid);
         }
@@ -249,8 +214,9 @@ impl ConnectedAppsService {
         sqlx::query(
             "INSERT INTO mcp_authorization_sessions (
                 id, extension_id, user_context_id, state_hash, code_verifier_ciphertext,
-                issuer, token_endpoint, client_id, redirect_uri, resource, expires_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                issuer, token_endpoint, client_id, redirect_uri, resource,
+                endpoint_url, extension_version, expires_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(session_id)
         .bind(extension_id)
@@ -262,6 +228,8 @@ impl ConnectedAppsService {
         .bind(&client_id)
         .bind(redirect_uri)
         .bind(&discovery.resource)
+        .bind(&endpoint)
+        .bind(version)
         .bind(expires_at)
         .execute(&self.db)
         .await?;
@@ -406,6 +374,16 @@ impl ConnectedAppsService {
         state: &str,
         code: &str,
     ) -> Result<RemoteExtension, ConnectedAppError> {
+        self.complete_with_issuer(context, state, code, None).await
+    }
+
+    pub async fn complete_with_issuer(
+        &self,
+        context: &impl RequestScope,
+        state: &str,
+        code: &str,
+        issuer_response: Option<&str>,
+    ) -> Result<RemoteExtension, ConnectedAppError> {
         let cipher = self.cipher()?;
         if state.is_empty() || code.is_empty() {
             return Err(ConnectedAppError::Invalid);
@@ -414,7 +392,8 @@ impl ConnectedAppsService {
         let session = sqlx::query(
             "SELECT s.id, s.extension_id, s.code_verifier_ciphertext, s.issuer, s.token_endpoint, \
                     s.client_id, s.redirect_uri, s.resource, s.expires_at, s.consumed_at, \
-                    e.endpoint_url, e.current_version \
+                    s.endpoint_url, s.extension_version, e.endpoint_url AS current_endpoint, \
+                    e.current_version, e.lifecycle_state \
              FROM mcp_authorization_sessions s JOIN remote_extensions e ON e.id = s.extension_id \
              WHERE s.state_hash = $1 AND s.user_context_id = $2 FOR UPDATE OF s",
         )
@@ -428,6 +407,17 @@ impl ConnectedAppsService {
         if consumed.is_some() || expires_at < Utc::now() {
             return Err(ConnectedAppError::Expired);
         }
+        let endpoint: String = session.get("endpoint_url");
+        let version: i32 = session.get("extension_version");
+        if endpoint != session.get::<String, _>("current_endpoint")
+            || version != session.get::<i32, _>("current_version")
+            || matches!(
+                session.get::<String, _>("lifecycle_state").as_str(),
+                "removed" | "quarantined"
+            )
+        {
+            return Err(ConnectedAppError::Expired);
+        }
         let session_id: Uuid = session.get("id");
         sqlx::query("UPDATE mcp_authorization_sessions SET consumed_at = now() WHERE id = $1")
             .bind(session_id)
@@ -436,9 +426,10 @@ impl ConnectedAppsService {
         tx.commit().await?;
 
         let extension_id: Uuid = session.get("extension_id");
-        let endpoint: String = session.get("endpoint_url");
-        let version: i32 = session.get("current_version");
         let issuer: String = session.get("issuer");
+        if issuer_response.is_some_and(|actual| actual != issuer) {
+            return Err(ConnectedAppError::Unauthorized);
+        }
         let token_endpoint: String = session.get("token_endpoint");
         let client_id: String = session.get("client_id");
         let redirect_uri: String = session.get("redirect_uri");
@@ -464,72 +455,50 @@ impl ConnectedAppsService {
 
         // The connection only counts once the app itself accepts the token.
         let probe = self
-            .pool
+            .discovery
             .discover(
-                extension_id,
                 &endpoint,
                 &tokens.access_token,
                 CONNECT_TIMEOUT,
                 self.allow_local,
             )
             .await;
-        let (server_info, tools) = match probe {
-            Ok(result) => result,
-            Err(err) => {
-                let _ = self
-                    .extensions
-                    .record_conformance(
-                        context,
-                        extension_id,
-                        version,
-                        false,
-                        json!({"source": "oauth_connect", "error": err.to_string()}),
-                    )
-                    .await;
-                return Err(err);
-            }
-        };
+        let (server_info, tools) = probe?;
 
         self.store_tokens(
+            session_id,
             extension_id,
+            &endpoint,
+            version,
             &issuer,
             &token_endpoint,
             &client_id,
             &resource,
             &tokens,
-            Some((&server_info, &tools)),
+            &server_info,
+            &tools,
         )
         .await?;
-        self.extensions
-            .record_conformance(
-                context,
-                extension_id,
-                version,
-                true,
-                json!({
-                    "source": "oauth_connect",
-                    "server_info": server_info,
-                    "tool_count": tools.len(),
-                    "tools": tools.iter().filter_map(|t| t.get("name")).collect::<Vec<_>>(),
-                }),
-            )
-            .await?;
-        Ok(self
-            .extensions
-            .set_operator_enabled(context, extension_id, true)
-            .await?)
+        // OAuth and tools/list prove connectivity, not the declared effects or
+        // safety of the tools. Only the operator conformance path may enable
+        // this extension for execution.
+        Ok(self.extensions.get(context, extension_id).await?)
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn store_tokens(
         &self,
+        session_id: Uuid,
         extension_id: Uuid,
+        expected_endpoint: &str,
+        expected_version: i32,
         issuer: &str,
         token_endpoint: &str,
         client_id: &str,
         resource: &str,
         tokens: &TokenSet,
-        discovered: Option<(&Value, &Vec<Value>)>,
+        server_info: &Value,
+        tools: &[Value],
     ) -> Result<(), ConnectedAppError> {
         let cipher = self.cipher()?;
         let access = cipher.seal(&aad(extension_id, "access"), &tokens.access_token)?;
@@ -540,10 +509,40 @@ impl ConnectedAppsService {
         let expires_at = tokens
             .expires_in
             .map(|seconds| Utc::now() + ChronoDuration::seconds(seconds));
-        match discovered {
-            Some((server_info, tools)) => {
-                sqlx::query(
-                    "INSERT INTO remote_extension_credentials (
+        let mut tx = self.db.begin().await?;
+        let current = sqlx::query(
+            "SELECT endpoint_url,current_version,lifecycle_state,user_context_id, \
+                    (SELECT capabilities FROM remote_extension_versions \
+                     WHERE extension_id=$1 AND version=remote_extensions.current_version) AS capabilities \
+             FROM remote_extensions \
+             WHERE id=$1 FOR UPDATE",
+        )
+        .bind(extension_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ConnectedAppError::Expired)?;
+        let current_endpoint: String = current.get("endpoint_url");
+        let current_version: i32 = current.get("current_version");
+        let state: String = current.get("lifecycle_state");
+        if current_endpoint != expected_endpoint
+            || expected_version != current_version
+            || matches!(state.as_str(), "removed" | "quarantined")
+        {
+            return Err(ConnectedAppError::Expired);
+        }
+        let session_still_valid: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM mcp_authorization_sessions \
+             WHERE id=$1 AND extension_id=$2 AND consumed_at IS NOT NULL)",
+        )
+        .bind(session_id)
+        .bind(extension_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !session_still_valid {
+            return Err(ConnectedAppError::Expired);
+        }
+        sqlx::query(
+            "INSERT INTO remote_extension_credentials (
                         extension_id, issuer, token_endpoint, client_id, resource,
                         access_token_ciphertext, refresh_token_ciphertext, scope, expires_at,
                         server_info, tools
@@ -556,64 +555,74 @@ impl ConnectedAppsService {
                         scope = EXCLUDED.scope, expires_at = EXCLUDED.expires_at,
                         server_info = EXCLUDED.server_info, tools = EXCLUDED.tools,
                         tools_refreshed_at = now(), connected_at = now(), updated_at = now()",
-                )
-                .bind(extension_id)
-                .bind(issuer)
-                .bind(token_endpoint)
-                .bind(client_id)
-                .bind(resource)
-                .bind(access)
-                .bind(refresh)
-                .bind(&tokens.scope)
-                .bind(expires_at)
-                .bind(server_info)
-                .bind(serde_json::to_value(tools).unwrap_or(Value::Array(vec![])))
-                .execute(&self.db)
-                .await?;
-            }
-            None => {
-                // A refresh may omit the refresh token; keep the old one then.
-                sqlx::query(
-                    "UPDATE remote_extension_credentials SET access_token_ciphertext = $2,
-                        refresh_token_ciphertext = COALESCE($3, refresh_token_ciphertext),
-                        expires_at = $4, updated_at = now() WHERE extension_id = $1",
-                )
-                .bind(extension_id)
-                .bind(access)
-                .bind(refresh)
-                .bind(expires_at)
-                .execute(&self.db)
-                .await?;
-            }
-        }
+        )
+        .bind(extension_id)
+        .bind(issuer)
+        .bind(token_endpoint)
+        .bind(client_id)
+        .bind(resource)
+        .bind(access)
+        .bind(refresh)
+        .bind(&tokens.scope)
+        .bind(expires_at)
+        .bind(server_info)
+        .bind(serde_json::to_value(tools).unwrap_or(Value::Array(vec![])))
+        .execute(&mut *tx)
+        .await?;
+
+        // A provider's tools/list is observed inventory, never a source of
+        // undeclared authority. Only the intersection can be service-authorized;
+        // operator state and per-agent grants are checked separately at use.
+        let declared: Vec<ExtensionCapability> =
+            serde_json::from_value(current.get("capabilities"))
+                .map_err(|_| ConnectedAppError::Invalid)?;
+        let reported: HashSet<&str> = tools
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+            .collect();
+        let authorized: Vec<String> = declared
+            .into_iter()
+            .filter(|capability| reported.contains(capability.external_key.as_str()))
+            .map(|capability| capability.external_key)
+            .collect();
+        let mut account_hasher = Sha256::new();
+        account_hasher.update(extension_id.as_bytes());
+        account_hasher.update(resource.as_bytes());
+        let account_hash = account_hasher.finalize().to_vec();
+        sqlx::query(
+            "INSERT INTO external_connections \
+             (user_context_id, remote_extension_id, external_account_hash, credential_custody, \
+              authorization_state, authorized_capabilities) \
+             VALUES ($1,$2,$3,'platform_held','authorized',$4) \
+             ON CONFLICT (user_context_id, remote_extension_id) \
+             WHERE remote_extension_id IS NOT NULL DO UPDATE SET \
+                 external_account_hash=EXCLUDED.external_account_hash, \
+                 authorization_state='authorized', authorized_capabilities=EXCLUDED.authorized_capabilities, \
+                 expires_at=NULL, revoked_at=NULL, failure_code=NULL, updated_at=now()",
+        )
+        .bind(current.get::<Uuid, _>("user_context_id"))
+        .bind(extension_id)
+        .bind(account_hash)
+        .bind(authorized)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
-    /// Delete stored credentials, cached sessions and pending actions. Called
-    /// when the user removes the app.
-    pub async fn forget(&self, extension_id: Uuid) -> Result<(), ConnectedAppError> {
-        self.pool.forget(extension_id);
-        sqlx::query("DELETE FROM connected_app_pending_actions WHERE extension_id = $1")
-            .bind(extension_id)
-            .execute(&self.db)
-            .await?;
-        sqlx::query("DELETE FROM remote_extension_credentials WHERE extension_id = $1")
-            .bind(extension_id)
-            .execute(&self.db)
-            .await?;
-        Ok(())
-    }
-
-    /// The user's live connections with the tools each app reported and how
-    /// the agent treats each one.
+    /// The user's authorized accounts with the tools each app reported.
+    /// Reported tools are display data, not execution authority.
     pub async fn connections(
         &self,
         context: &impl RequestScope,
     ) -> Result<Vec<Value>, ConnectedAppError> {
         let rows = sqlx::query(
-            "SELECT c.extension_id, c.tools, c.connected_at, c.tools_refreshed_at \
+            "SELECT c.extension_id, x.id AS connection_id, c.tools, c.connected_at, c.tools_refreshed_at, \
+                    e.lifecycle_state \
              FROM remote_extension_credentials c JOIN remote_extensions e ON e.id = c.extension_id \
-             WHERE e.user_context_id = $1 AND e.lifecycle_state = 'active'",
+             JOIN external_connections x ON x.remote_extension_id=e.id AND x.user_context_id=e.user_context_id \
+             WHERE e.user_context_id = $1 AND e.lifecycle_state <> 'removed' \
+             AND x.authorization_state='authorized'",
         )
         .bind(context.request_context().id.0)
         .fetch_all(&self.db)
@@ -628,14 +637,10 @@ impl ConnectedAppsService {
                         items
                             .iter()
                             .map(|tool| {
-                                let policy = classify(tool);
                                 json!({
                                     "name": tool.get("name"),
                                     "title": tool.get("title").or_else(|| tool.pointer("/annotations/title")),
                                     "description": tool.get("description"),
-                                    "policy": policy,
-                                    "read_only": policy == policy::ToolPolicy::Read,
-                                    "asks_first": policy.needs_confirmation(),
                                 })
                             })
                             .collect()
@@ -643,6 +648,8 @@ impl ConnectedAppsService {
                     .unwrap_or_default();
                 json!({
                     "extension_id": row.get::<Uuid, _>("extension_id"),
+                    "connection_id": row.get::<Uuid, _>("connection_id"),
+                    "lifecycle_state": row.get::<String, _>("lifecycle_state"),
                     "connected_at": row.get::<DateTime<Utc>, _>("connected_at"),
                     "tools_refreshed_at": row.get::<DateTime<Utc>, _>("tools_refreshed_at"),
                     "tools": summary,
@@ -651,375 +658,143 @@ impl ConnectedAppsService {
             .collect())
     }
 
-    /// Every app the person has connected, across all of their contexts, so
-    /// an app connected on the web is usable on a call.
-    pub async fn apps_for_user(
+    /// A host-facing read seam. The server, not the model, resolves the
+    /// connection, selected agent, declaration, grant and OAuth credential.
+    pub async fn read_tool(
         &self,
-        user_id: UserId,
-    ) -> Result<Vec<ConnectedApp>, ConnectedAppError> {
-        let rows = sqlx::query(
-            "SELECT e.id, e.external_key, e.display_name, c.tools, c.tools_refreshed_at, \
-                    c.last_used_at \
-             FROM remote_extensions e \
-             JOIN user_contexts uc ON uc.id = e.user_context_id \
-             JOIN remote_extension_credentials c ON c.extension_id = e.id \
-             WHERE uc.user_id = $1 AND e.lifecycle_state = 'active' \
-             ORDER BY e.display_name",
-        )
-        .bind(user_id.0)
-        .fetch_all(&self.db)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| ConnectedApp {
-                extension_id: row.get("id"),
-                app_key: row.get("external_key"),
-                app_name: row.get("display_name"),
-                tools: row
-                    .get::<Value, _>("tools")
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default(),
-                tools_refreshed_at: row.get("tools_refreshed_at"),
-                last_used_at: row.get("last_used_at"),
-            })
-            .collect())
-    }
-
-    /// Load and decrypt an app's credentials for this user, refreshing the
-    /// access token first when it is about to expire.
-    async fn live_credentials(
-        &self,
-        user_id: UserId,
-        extension_id: Uuid,
-    ) -> Result<LiveCredentials, ConnectedAppError> {
-        let row = self.credential_row(user_id, extension_id).await?;
-        let endpoint: String = row.get("endpoint_url");
-        let expires_at: Option<DateTime<Utc>> = row.get("expires_at");
-        let access_token =
-            if expires_at.is_some_and(|at| at < Utc::now() + ChronoDuration::seconds(60)) {
-                self.refresh_access(user_id, extension_id, &endpoint, None)
-                    .await?
-            } else {
-                self.cipher()?.open(
-                    &aad(extension_id, "access"),
-                    &row.get::<Vec<u8>, _>("access_token_ciphertext"),
-                )?
-            };
-        Ok(LiveCredentials {
-            endpoint,
-            access_token,
-        })
-    }
-
-    async fn credential_row(
-        &self,
-        user_id: UserId,
-        extension_id: Uuid,
-    ) -> Result<sqlx::postgres::PgRow, ConnectedAppError> {
-        sqlx::query(
-            "SELECT e.endpoint_url, c.issuer, c.token_endpoint, c.client_id, c.resource, \
-                    c.access_token_ciphertext, c.refresh_token_ciphertext, c.expires_at \
-             FROM remote_extensions e \
-             JOIN user_contexts uc ON uc.id = e.user_context_id \
-             JOIN remote_extension_credentials c ON c.extension_id = e.id \
-             WHERE e.id = $1 AND uc.user_id = $2 AND e.lifecycle_state = 'active'",
-        )
-        .bind(extension_id)
-        .bind(user_id.0)
-        .fetch_optional(&self.db)
-        .await?
-        .ok_or(ConnectedAppError::NotFound)
-    }
-
-    /// Call one tool on a connected app for this user within `timeout`,
-    /// refreshing a rejected access token once.
-    pub async fn call_tool(
-        &self,
-        user_id: UserId,
-        extension_id: Uuid,
+        context: &impl RequestScope,
+        agent_external_key: &str,
+        connection_id: Uuid,
         tool_name: &str,
         arguments: Value,
-        timeout: Duration,
     ) -> Result<Value, ConnectedAppError> {
-        let live = self.live_credentials(user_id, extension_id).await?;
-        let call = |token: String| {
-            let arguments = arguments.clone();
-            let endpoint = live.endpoint.clone();
-            async move {
-                self.pool
-                    .call_tool(
-                        extension_id,
-                        &endpoint,
-                        &token,
-                        tool_name,
-                        arguments,
-                        timeout,
-                        self.allow_local,
-                    )
-                    .await
-            }
-        };
-        let result = match call(live.access_token.clone()).await {
-            Err(ConnectedAppError::Unauthorized) => {
-                let token = self
-                    .refresh_access(
-                        user_id,
-                        extension_id,
-                        &live.endpoint,
-                        Some(&live.access_token),
-                    )
-                    .await?;
-                call(token).await
-            }
-            other => other,
-        };
-        match &result {
-            Ok(_) => {
-                let db = self.db.clone();
-                tokio::spawn(async move {
-                    let _ = sqlx::query(
-                        "UPDATE remote_extension_credentials SET last_used_at = now() \
-                         WHERE extension_id = $1",
-                    )
-                    .bind(extension_id)
-                    .execute(&db)
-                    .await;
-                });
-            }
-            // The server's tool list changed under us: learn the new one so
-            // the next turn offers the right tools.
-            Err(ConnectedAppError::UnknownTool) => {
-                if let Err(err) = self.refresh_tools(user_id, extension_id).await {
-                    tracing::warn!(%err, %extension_id, "tool list refresh failed");
-                }
-            }
-            Err(_) => {}
-        }
-        result
-    }
-
-    /// Re-read an app's tool list from its server.
-    pub async fn refresh_tools(
-        &self,
-        user_id: UserId,
-        extension_id: Uuid,
-    ) -> Result<usize, ConnectedAppError> {
-        let live = self.live_credentials(user_id, extension_id).await?;
-        let (server_info, tools) = self
-            .pool
-            .discover(
-                extension_id,
-                &live.endpoint,
-                &live.access_token,
-                REFRESH_TIMEOUT,
-                self.allow_local,
-            )
-            .await?;
-        sqlx::query(
-            "UPDATE remote_extension_credentials SET tools = $2, server_info = $3, \
-             tools_refreshed_at = now(), updated_at = now() WHERE extension_id = $1",
+        self.invoke_tool(
+            context,
+            agent_external_key,
+            connection_id,
+            tool_name,
+            arguments,
+            false,
         )
-        .bind(extension_id)
-        .bind(Value::Array(tools.clone()))
-        .bind(server_info)
-        .execute(&self.db)
-        .await?;
-        Ok(tools.len())
+        .await
     }
 
-    /// Open an MCP session in advance so the first call of a turn is fast.
-    pub async fn warm(
+    /// Only call after Core has consumed an exact approval and claimed its
+    /// durable execution. This module still checks the current tool authority.
+    pub async fn approved_tool(
         &self,
-        user_id: UserId,
-        extension_id: Uuid,
-        timeout: Duration,
-    ) -> Result<(), ConnectedAppError> {
-        let live = self.live_credentials(user_id, extension_id).await?;
-        if self.pool.is_warm(extension_id, &live.access_token) {
-            return Ok(());
+        context: &impl RequestScope,
+        agent_external_key: &str,
+        connection_id: Uuid,
+        tool_name: &str,
+        arguments: Value,
+    ) -> Result<Value, ConnectedAppError> {
+        self.invoke_tool(
+            context,
+            agent_external_key,
+            connection_id,
+            tool_name,
+            arguments,
+            true,
+        )
+        .await
+    }
+
+    async fn invoke_tool(
+        &self,
+        context: &impl RequestScope,
+        agent_external_key: &str,
+        connection_id: Uuid,
+        tool_name: &str,
+        arguments: Value,
+        approved_write: bool,
+    ) -> Result<Value, ConnectedAppError> {
+        if agent_external_key.trim().is_empty()
+            || tool_name.trim().is_empty()
+            || !arguments.is_object()
+            || serde_json::to_vec(&arguments).map_or(true, |data| data.len() > 2 * 1024 * 1024)
+        {
+            return Err(ConnectedAppError::Invalid);
         }
-        self.pool
-            .warm(
-                extension_id,
-                &live.endpoint,
-                &live.access_token,
-                timeout,
-                self.allow_local,
-            )
-            .await
-    }
-
-    fn refresh_lock(&self, extension_id: Uuid) -> Arc<tokio::sync::Mutex<()>> {
-        self.refresh_locks
-            .lock()
-            .unwrap()
-            .entry(extension_id)
-            .or_default()
-            .clone()
-    }
-
-    /// Exchange the refresh token for a new access token. Concurrent callers
-    /// wait for one refresh; if another caller already replaced a `stale`
-    /// token, its result is reused instead of refreshing again.
-    async fn refresh_access(
-        &self,
-        user_id: UserId,
-        extension_id: Uuid,
-        endpoint: &str,
-        stale: Option<&str>,
-    ) -> Result<String, ConnectedAppError> {
-        let lock = self.refresh_lock(extension_id);
-        let _guard = lock.lock().await;
-        let cipher = self.cipher()?;
-        let row = self.credential_row(user_id, extension_id).await?;
-        let current = cipher.open(
+        let mut tx = self.db.begin().await?;
+        let row = sqlx::query(
+            "SELECT e.id AS extension_id,e.endpoint_url,e.conformance_status,e.operator_enabled,v.capabilities, \
+                    c.access_token_ciphertext,c.tools \
+             FROM external_connections x \
+             JOIN remote_extensions e ON e.id=x.remote_extension_id AND e.user_context_id=x.user_context_id \
+             JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version \
+             JOIN remote_extension_credentials c ON c.extension_id=e.id \
+             WHERE x.id=$1 AND x.user_context_id=$2 AND x.authorization_state='authorized' \
+               AND (x.expires_at IS NULL OR x.expires_at>now()) \
+               AND $3=ANY(x.authorized_capabilities) \
+               AND e.lifecycle_state='active' AND e.consent_status='consented' \
+               AND EXISTS (SELECT 1 FROM agent_capability_grants g \
+                   JOIN agent_definitions a ON a.id=g.agent_definition_id \
+                   JOIN deployment_agent_selections s ON s.agent_definition_id=a.id \
+                   WHERE g.connection_id=x.id AND g.user_context_id=x.user_context_id \
+                     AND g.capability_external_key=$3 AND g.state='enabled' \
+                     AND a.external_key=$4 AND a.deployment_id=$5 AND a.state='enabled' \
+                     AND ($3=ANY(a.requested_capability_categories) \
+                          OR '*'=ANY(a.requested_capability_categories))) \
+             FOR SHARE OF x,e",
+        )
+        .bind(connection_id)
+        .bind(context.request_context().id.0)
+        .bind(tool_name)
+        .bind(agent_external_key)
+        .bind(context.request_context().subject.deployment_id.0)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ConnectedAppError::GrantRequired)?;
+        let declared: Vec<ExtensionCapability> = serde_json::from_value(row.get("capabilities"))
+            .map_err(|_| ConnectedAppError::Invalid)?;
+        let cap = declared
+            .iter()
+            .find(|cap| cap.external_key == tool_name)
+            .ok_or(ConnectedAppError::UnknownTool)?;
+        let consequential = cap.consequential || cap.effect.is_consequential();
+        if consequential && !approved_write {
+            return Err(ConnectedAppError::WriteRequiresApproval);
+        }
+        if approved_write
+            && (!consequential
+                || row.get::<String, _>("conformance_status") != "passed"
+                || !row.get::<bool, _>("operator_enabled"))
+        {
+            return Err(ConnectedAppError::WriteRequiresApproval);
+        }
+        let reported: Value = row.get("tools");
+        if !reported.as_array().is_some_and(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool.get("name").and_then(Value::as_str) == Some(tool_name))
+        }) {
+            return Err(ConnectedAppError::UnknownTool);
+        }
+        let extension_id: Uuid = row.get("extension_id");
+        let endpoint: String = row.get("endpoint_url");
+        let token = self.cipher()?.open(
             &aad(extension_id, "access"),
             &row.get::<Vec<u8>, _>("access_token_ciphertext"),
         )?;
-        let expires_at: Option<DateTime<Utc>> = row.get("expires_at");
-        let fresh = expires_at.is_none_or(|at| at > Utc::now() + ChronoDuration::seconds(60));
-        // Another caller refreshed while we waited for the lock.
-        if stale.is_some_and(|old| old != current) || (stale.is_none() && fresh) {
-            return Ok(current);
+        let result = self
+            .discovery
+            .call_tool(
+                &endpoint,
+                &token,
+                tool_name,
+                arguments,
+                CONNECT_TIMEOUT,
+                self.allow_local,
+            )
+            .await?;
+        if result.get("resultType").and_then(Value::as_str) == Some("input_required") {
+            return Err(ConnectedAppError::Provider(
+                "tool requires an interactive continuation that Vox cannot complete".into(),
+            ));
         }
-        let stored: Option<Vec<u8>> = row.get("refresh_token_ciphertext");
-        let refresh_token = stored
-            .map(|s| cipher.open(&aad(extension_id, "refresh"), &s))
-            .transpose()?
-            .ok_or(ConnectedAppError::Unauthorized)?;
-        let issuer: String = row.get("issuer");
-        let token_endpoint: String = row.get("token_endpoint");
-        let client_id: String = row.get("client_id");
-        let resource: String = row.get("resource");
-        let (secret, auth_method, send_resource) = self
-            .client_credentials(endpoint, &issuer, &client_id, None)
-            .await?;
-        let request = TokenRequest {
-            token_endpoint: &token_endpoint,
-            client_id: &client_id,
-            client_secret: secret.as_deref(),
-            auth_method: &auth_method,
-            resource: send_resource.then_some(resource.as_str()),
-        };
-        let tokens = oauth::refresh(&request, &refresh_token, self.allow_local).await?;
-        self.store_tokens(
-            extension_id,
-            &issuer,
-            &token_endpoint,
-            &client_id,
-            &resource,
-            &tokens,
-            None,
-        )
-        .await?;
-        Ok(tokens.access_token)
-    }
-
-    /// Record an action that needs the user's go-ahead. It can only be
-    /// confirmed from a later turn than `turn`.
-    pub async fn propose(
-        &self,
-        user_id: UserId,
-        extension_id: Uuid,
-        tool_name: &str,
-        arguments: &Value,
-        turn: Uuid,
-    ) -> Result<Uuid, ConnectedAppError> {
-        // A new proposal for the same tool supersedes an older one, so the
-        // agent never confirms a stale version of what the user asked for.
-        sqlx::query(
-            "DELETE FROM connected_app_pending_actions \
-             WHERE user_id = $1 AND extension_id = $2 AND tool_name = $3",
-        )
-        .bind(user_id.0)
-        .bind(extension_id)
-        .bind(tool_name)
-        .execute(&self.db)
-        .await?;
-        let id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO connected_app_pending_actions \
-             (user_id, extension_id, tool_name, arguments, arguments_hash, proposed_turn, expires_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(mins => $7)) RETURNING id",
-        )
-        .bind(user_id.0)
-        .bind(extension_id)
-        .bind(tool_name)
-        .bind(arguments)
-        .bind(sha256_hex(&canonical_json(arguments)))
-        .bind(turn)
-        .bind(PENDING_ACTION_TTL_MINUTES as i32)
-        .fetch_one(&self.db)
-        .await?;
-        Ok(id)
-    }
-
-    /// The user's unexpired pending actions, newest first.
-    pub async fn pending_actions(
-        &self,
-        user_id: UserId,
-    ) -> Result<Vec<PendingAction>, ConnectedAppError> {
-        let rows = sqlx::query(
-            "SELECT p.id, p.extension_id, e.display_name, p.tool_name, p.arguments, p.proposed_turn \
-             FROM connected_app_pending_actions p \
-             JOIN remote_extensions e ON e.id = p.extension_id \
-             WHERE p.user_id = $1 AND p.expires_at > now() AND e.lifecycle_state = 'active' \
-             ORDER BY p.created_at DESC LIMIT 5",
-        )
-        .bind(user_id.0)
-        .fetch_all(&self.db)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| PendingAction {
-                id: row.get("id"),
-                extension_id: row.get("extension_id"),
-                app_name: row.get("display_name"),
-                tool_name: row.get("tool_name"),
-                arguments: row.get("arguments"),
-                proposed_turn: row.get("proposed_turn"),
-            })
-            .collect())
-    }
-
-    /// Claim a pending action for execution. Fails in the turn that proposed
-    /// it, so the agent cannot approve its own proposal; succeeds at most once.
-    pub async fn claim(
-        &self,
-        user_id: UserId,
-        action_id: Uuid,
-        turn: Uuid,
-    ) -> Result<PendingAction, ConnectedAppError> {
-        let row = sqlx::query(
-            "DELETE FROM connected_app_pending_actions p USING remote_extensions e \
-             WHERE p.id = $1 AND p.user_id = $2 AND p.proposed_turn <> $3 \
-               AND p.expires_at > now() AND e.id = p.extension_id \
-             RETURNING p.id, p.extension_id, e.display_name, p.tool_name, p.arguments, p.proposed_turn",
-        )
-        .bind(action_id)
-        .bind(user_id.0)
-        .bind(turn)
-        .fetch_optional(&self.db)
-        .await?
-        .ok_or(ConnectedAppError::NoPendingAction)?;
-        Ok(PendingAction {
-            id: row.get("id"),
-            extension_id: row.get("extension_id"),
-            app_name: row.get("display_name"),
-            tool_name: row.get("tool_name"),
-            arguments: row.get("arguments"),
-            proposed_turn: row.get("proposed_turn"),
-        })
-    }
-
-    /// Drop a pending action the user declined.
-    pub async fn discard(&self, user_id: UserId, action_id: Uuid) -> Result<(), ConnectedAppError> {
-        sqlx::query("DELETE FROM connected_app_pending_actions WHERE id = $1 AND user_id = $2")
-            .bind(action_id)
-            .bind(user_id.0)
-            .execute(&self.db)
-            .await?;
-        Ok(())
+        tx.commit().await?;
+        Ok(result)
     }
 }
 
@@ -1027,29 +802,4 @@ fn aad(extension_id: Uuid, purpose: &str) -> Vec<u8> {
     let mut data = extension_id.as_bytes().to_vec();
     data.extend_from_slice(purpose.as_bytes());
     data
-}
-
-/// Stable JSON text with sorted object keys, so the same arguments hash the
-/// same regardless of the order the model produced them in.
-fn canonical_json(value: &Value) -> String {
-    match value {
-        Value::Object(map) => {
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            let body: Vec<String> = keys
-                .into_iter()
-                .map(|k| format!("{}:{}", Value::String(k.clone()), canonical_json(&map[k])))
-                .collect();
-            format!("{{{}}}", body.join(","))
-        }
-        Value::Array(items) => format!(
-            "[{}]",
-            items
-                .iter()
-                .map(canonical_json)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        other => other.to_string(),
-    }
 }

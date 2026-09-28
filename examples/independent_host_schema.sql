@@ -10,7 +10,7 @@ CREATE TABLE public.platform_deployments (
 CREATE TABLE public.user_contexts (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     deployment_id uuid NOT NULL REFERENCES public.platform_deployments(id),
-    user_id uuid NOT NULL UNIQUE REFERENCES public.users(id),
+    user_id uuid NOT NULL REFERENCES public.users(id),
     UNIQUE (id, user_id)
 );
 CREATE TABLE public.agent_definitions (

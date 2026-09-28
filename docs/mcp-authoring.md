@@ -1,6 +1,6 @@
 # Add an MCP read tool: current developer path
 
-This is a local authoring path for the shared connector adapter's current `tools/call` subset. It is **not** a complete connect-and-use quickstart: production provider authorization, dynamic tool discovery, agent registration, and self-service operator conformance are still missing. See the [Vox Core connection API](https://github.com/vox-suite/vox-core/blob/main/docs/connections.md).
+This is a local authoring path for the shared connector adapter's current `tools/call` subset. OAuth linking, dynamic tool discovery, context-owned connections, explicit agent grants, and a signed host read/write interface now exist. It is **not** a complete connect-and-use quickstart: authors must supply reviewed tool declarations, an agent must request the capability (or `*`) before a user can grant it, and operator conformance is not self-service. See the [Vox Core connection contract](https://github.com/vox-suite/vox-core/blob/main/docs/connections.md).
 
 ## Run a deterministic local fixture
 
@@ -14,9 +14,22 @@ python3 examples/mcp/minimal_server.py
 python3 tools/mcp_probe.py http://127.0.0.1:8765/mcp --tool echo.read --arguments '{"text":"hello"}' --local-test
 ```
 
-The probe checks the JSON-RPC response id, `2.0` envelope, and MCP `content` or `structuredContent` result. It sends the currently pinned `2026-07-28` MCP headers and a bounded request. It is a protocol smoke test, not an operator conformance certificate or a security audit. The production connector adapter only dispatches to public HTTPS addresses, does a fresh DNS check, pins the permitted address, refuses redirects, and limits the request and response to 2 MiB.
+The probe checks the JSON-RPC response id, `2.0` envelope, and MCP `content` or `structuredContent` result. It sends `2026-07-28` MCP headers and a bounded request. It is a protocol smoke test, not an operator conformance certificate or a security audit. The OAuth client first probes `2026-07-28` and falls back to a 2025 session only on explicit unsupported-method/version responses. Production traffic requires public HTTPS, a fresh DNS check with address pinning, no redirects, and bounded responses.
 
 ## Declare a remote integration
+
+Start with [the read-only manifest](../examples/mcp/read-only-manifest.json),
+then run the same declaration validation used by installation:
+
+```sh
+cargo run --quiet --bin vox-connector-check -- examples/mcp/read-only-manifest.json
+```
+
+The command prints a stable SHA-256 digest for the canonical JSON declaration.
+It checks identity, endpoint shape, distinct capability keys, effects, and
+recipient disclosures without contacting the provider. CI can run it before
+publishing a manifest. It is not an operator review or proof that the server
+actually implements the declared tools.
 
 The registered host calls `POST /v1/remote-extensions` with a fresh host assertion and a body like:
 

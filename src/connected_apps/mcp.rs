@@ -1,6 +1,5 @@
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -11,39 +10,21 @@ use uuid::Uuid;
 use super::ConnectedAppError;
 use crate::remote_extensions::adapters::transport::client_for_endpoint;
 
-const PROTOCOL_VERSION: &str = "2025-06-18";
+const LEGACY_PROTOCOL_VERSION: &str = "2025-06-18";
+const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TOOL_PAGES: usize = 10;
 /// Upper bound for any single request; callers pass tighter per-call limits.
 const CLIENT_CEILING: Duration = Duration::from_secs(60);
 /// Re-resolve and re-pin DNS this often, so an address change is picked up.
 const CLIENT_TTL: Duration = Duration::from_secs(300);
-/// Forget an idle session well before servers typically expire one.
-const SESSION_IDLE_TTL: Duration = Duration::from_secs(600);
-
-/// Negotiated state of one MCP session, reusable across tool calls.
-#[derive(Clone, Debug)]
-struct SessionState {
-    session_id: Option<String>,
-    protocol_version: String,
-    server_info: Value,
-    last_used: Instant,
-}
-
-/// Reuses DNS-pinned HTTP clients (and so their TLS / HTTP2 connections) per
-/// endpoint, and MCP sessions per connected app and access token, so a warm
-/// tool call is one round trip instead of initialize + initialized + call.
+/// DNS-pinned HTTP clients for OAuth-time MCP tool discovery.
 #[derive(Clone, Default)]
-pub struct McpPool {
+pub struct McpDiscoveryClient {
     clients: Arc<Mutex<HashMap<String, (reqwest::Client, Instant)>>>,
-    sessions: Arc<Mutex<HashMap<(Uuid, String), SessionState>>>,
 }
 
-fn fingerprint(token: &str) -> String {
-    hex::encode(&Sha256::digest(token.as_bytes())[..8])
-}
-
-impl McpPool {
+impl McpDiscoveryClient {
     async fn client(
         &self,
         endpoint: &str,
@@ -64,126 +45,9 @@ impl McpPool {
         Ok(client)
     }
 
-    fn cached(&self, key: &(Uuid, String)) -> Option<SessionState> {
-        let mut sessions = self.sessions.lock().unwrap();
-        match sessions.get(key) {
-            Some(state) if state.last_used.elapsed() < SESSION_IDLE_TTL => Some(state.clone()),
-            Some(_) => {
-                sessions.remove(key);
-                None
-            }
-            None => None,
-        }
-    }
-
-    fn store(&self, key: (Uuid, String), session: &McpSession) {
-        self.sessions.lock().unwrap().insert(
-            key,
-            SessionState {
-                session_id: session.session_id.clone(),
-                protocol_version: session.protocol_version.clone(),
-                server_info: session.server_info.clone(),
-                last_used: Instant::now(),
-            },
-        );
-    }
-
-    /// Drop cached sessions for an app, e.g. after it was disconnected.
-    pub fn forget(&self, extension_id: Uuid) {
-        self.sessions
-            .lock()
-            .unwrap()
-            .retain(|(id, _), _| *id != extension_id);
-    }
-
-    pub fn is_warm(&self, extension_id: Uuid, access_token: &str) -> bool {
-        self.cached(&(extension_id, fingerprint(access_token)))
-            .is_some()
-    }
-
-    async fn session(
-        &self,
-        extension_id: Uuid,
-        endpoint: &str,
-        access_token: &str,
-        timeout: Duration,
-        allow_local: bool,
-    ) -> Result<(McpSession, bool), ConnectedAppError> {
-        let http = self.client(endpoint, allow_local).await?;
-        let key = (extension_id, fingerprint(access_token));
-        if let Some(state) = self.cached(&key) {
-            return Ok((
-                McpSession {
-                    http,
-                    endpoint: endpoint.to_string(),
-                    access_token: access_token.to_string(),
-                    session_id: state.session_id,
-                    protocol_version: state.protocol_version,
-                    server_info: state.server_info,
-                    timeout,
-                },
-                true,
-            ));
-        }
-        let session = McpSession::open(http, endpoint, access_token, timeout).await?;
-        self.store(key, &session);
-        Ok((session, false))
-    }
-
-    /// Open a session ahead of the first call so it is warm when needed.
-    pub async fn warm(
-        &self,
-        extension_id: Uuid,
-        endpoint: &str,
-        access_token: &str,
-        timeout: Duration,
-        allow_local: bool,
-    ) -> Result<(), ConnectedAppError> {
-        self.session(extension_id, endpoint, access_token, timeout, allow_local)
-            .await
-            .map(|_| ())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn call_tool(
-        &self,
-        extension_id: Uuid,
-        endpoint: &str,
-        access_token: &str,
-        name: &str,
-        arguments: Value,
-        timeout: Duration,
-        allow_local: bool,
-    ) -> Result<Value, ConnectedAppError> {
-        let key = (extension_id, fingerprint(access_token));
-        let (mut session, reused) = self
-            .session(extension_id, endpoint, access_token, timeout, allow_local)
-            .await?;
-        match session.call_tool(name, arguments.clone()).await {
-            // The server forgot the session: start a new one and retry once.
-            Err(ConnectedAppError::SessionExpired) if reused => {
-                self.sessions.lock().unwrap().remove(&key);
-                let http = self.client(endpoint, allow_local).await?;
-                let mut fresh = McpSession::open(http, endpoint, access_token, timeout).await?;
-                let result = fresh.call_tool(name, arguments).await;
-                self.store(key, &fresh);
-                result
-            }
-            Err(ConnectedAppError::Unauthorized) => {
-                self.sessions.lock().unwrap().remove(&key);
-                Err(ConnectedAppError::Unauthorized)
-            }
-            other => {
-                self.store(key, &session);
-                other
-            }
-        }
-    }
-
     /// Open a fresh session and list the server's tools with its info.
     pub async fn discover(
         &self,
-        extension_id: Uuid,
         endpoint: &str,
         access_token: &str,
         timeout: Duration,
@@ -192,19 +56,40 @@ impl McpPool {
         let http = self.client(endpoint, allow_local).await?;
         let mut session = McpSession::open(http, endpoint, access_token, timeout).await?;
         let tools = session.list_tools().await?;
-        self.store((extension_id, fingerprint(access_token)), &session);
         Ok((session.server_info.clone(), tools))
+    }
+
+    /// Execute one already-authorized tool through a fresh authenticated MCP
+    /// session. Authorization and effect checks belong to the caller.
+    pub async fn call_tool(
+        &self,
+        endpoint: &str,
+        access_token: &str,
+        tool_name: &str,
+        arguments: Value,
+        timeout: Duration,
+        allow_local: bool,
+    ) -> Result<Value, ConnectedAppError> {
+        let http = self.client(endpoint, allow_local).await?;
+        let mut session = McpSession::open(http, endpoint, access_token, timeout).await?;
+        session
+            .request(
+                "tools/call",
+                json!({"name": tool_name, "arguments": arguments}),
+            )
+            .await
     }
 }
 
-/// One Streamable HTTP MCP session (spec 2025-06-18) authenticated with an
-/// OAuth access token.
+/// One authenticated Streamable HTTP peer. Modern requests are stateless;
+/// legacy requests retain the negotiated session identifier.
 pub struct McpSession {
     http: reqwest::Client,
     endpoint: String,
     access_token: String,
     session_id: Option<String>,
     protocol_version: String,
+    modern: bool,
     pub server_info: Value,
     timeout: Duration,
 }
@@ -221,15 +106,22 @@ impl McpSession {
             endpoint: endpoint.to_string(),
             access_token: access_token.to_string(),
             session_id: None,
-            protocol_version: PROTOCOL_VERSION.to_string(),
+            protocol_version: LEGACY_PROTOCOL_VERSION.to_string(),
+            modern: false,
             server_info: Value::Null,
             timeout,
         };
+        if let Some(server_info) = session.probe_modern().await? {
+            session.protocol_version = MODERN_PROTOCOL_VERSION.to_string();
+            session.modern = true;
+            session.server_info = server_info;
+            return Ok(session);
+        }
         let result = session
             .request(
                 "initialize",
                 json!({
-                    "protocolVersion": PROTOCOL_VERSION,
+                    "protocolVersion": LEGACY_PROTOCOL_VERSION,
                     "capabilities": {},
                     "clientInfo": {"name": "Vox", "version": env!("CARGO_PKG_VERSION")}
                 }),
@@ -247,6 +139,84 @@ impl McpSession {
         session.server_info = result.get("serverInfo").cloned().unwrap_or(Value::Null);
         session.notify("notifications/initialized").await?;
         Ok(session)
+    }
+
+    async fn probe_modern(&self) -> Result<Option<Value>, ConnectedAppError> {
+        let id = Uuid::new_v4().to_string();
+        let response = self.http.post(&self.endpoint)
+            .timeout(self.timeout)
+            .bearer_auth(&self.access_token)
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream")
+            .header("mcp-protocol-version", MODERN_PROTOCOL_VERSION)
+            .header("mcp-method", "server/discover")
+            .json(&json!({
+                "jsonrpc": "2.0", "id": id, "method": "server/discover",
+                "params": {"_meta": {
+                    "io.modelcontextprotocol/protocolVersion": MODERN_PROTOCOL_VERSION,
+                    "io.modelcontextprotocol/clientInfo": {"name": "Vox", "version": env!("CARGO_PKG_VERSION")},
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }}
+            }))
+            .send().await.map_err(network)?;
+        if response.status().as_u16() == 401 {
+            return Err(ConnectedAppError::Unauthorized);
+        }
+        let status = response.status();
+        let is_event_stream = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.starts_with("text/event-stream"));
+        let body = read_bounded(response).await?;
+        let message = if is_event_stream {
+            message_from_event_stream(&body, &id)?
+        } else {
+            serde_json::from_slice::<Value>(&body).map_err(|_| {
+                ConnectedAppError::Provider("invalid modern MCP discovery response".into())
+            })?
+        };
+        if message.get("id").and_then(Value::as_str) != Some(&id) {
+            return Err(ConnectedAppError::Provider(
+                "MCP discovery response id mismatch".into(),
+            ));
+        }
+        if let Some(code) = message.pointer("/error/code").and_then(Value::as_i64) {
+            if code == -32601 || code == -32022 {
+                return Ok(None);
+            }
+            return Err(ConnectedAppError::Provider(format!(
+                "modern MCP discovery error {code}"
+            )));
+        }
+        if !status.is_success() {
+            return Err(ConnectedAppError::Provider(format!(
+                "modern MCP discovery HTTP {status}"
+            )));
+        }
+        let result = message.get("result").ok_or_else(|| {
+            ConnectedAppError::Provider("modern MCP discovery has no result".into())
+        })?;
+        if result.get("resultType").and_then(Value::as_str) != Some("complete") {
+            return Err(ConnectedAppError::Provider(
+                "modern MCP discovery is not complete".into(),
+            ));
+        }
+        if let Some(versions) = result.get("supportedVersions").and_then(Value::as_array)
+            && !versions
+                .iter()
+                .any(|version| version.as_str() == Some(MODERN_PROTOCOL_VERSION))
+        {
+            return Err(ConnectedAppError::Provider(
+                "MCP server does not support the selected protocol version".into(),
+            ));
+        }
+        Ok(Some(
+            result
+                .pointer("/_meta/io.modelcontextprotocol~1serverInfo")
+                .cloned()
+                .unwrap_or(Value::Null),
+        ))
     }
 
     async fn list_tools(&mut self) -> Result<Vec<Value>, ConnectedAppError> {
@@ -270,15 +240,6 @@ impl McpSession {
             }
         }
         Ok(tools)
-    }
-
-    async fn call_tool(
-        &mut self,
-        name: &str,
-        arguments: Value,
-    ) -> Result<Value, ConnectedAppError> {
-        self.request("tools/call", json!({"name": name, "arguments": arguments}))
-            .await
     }
 
     fn post(&self, initialize: bool) -> reqwest::RequestBuilder {
@@ -314,8 +275,22 @@ impl McpSession {
 
     async fn request(&mut self, method: &str, params: Value) -> Result<Value, ConnectedAppError> {
         let id = Uuid::new_v4().to_string();
-        let response = self
-            .post(method == "initialize")
+        let mut params = params;
+        let mut request = self.post(method == "initialize");
+        if self.modern {
+            if let Some(map) = params.as_object_mut() {
+                map.insert("_meta".into(), json!({
+                    "io.modelcontextprotocol/protocolVersion": MODERN_PROTOCOL_VERSION,
+                    "io.modelcontextprotocol/clientInfo": {"name": "Vox", "version": env!("CARGO_PKG_VERSION")},
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }));
+            }
+            request = request.header("mcp-method", method);
+            if let Some(name) = params.get("name").and_then(Value::as_str) {
+                request = request.header("mcp-name", name);
+            }
+        }
+        let response = request
             .json(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
             .send()
             .await
@@ -347,9 +322,8 @@ impl McpSession {
                 return Err(ConnectedAppError::SessionExpired);
             }
             return Err(ConnectedAppError::Provider(format!(
-                "{method} returned HTTP {}: {}",
+                "{method} returned HTTP {}",
                 status.as_u16(),
-                text.chars().take(300).collect::<String>()
             )));
         }
         let message = if is_event_stream {
@@ -435,10 +409,97 @@ fn rpc_result(message: Value, id: &str, method: &str) -> Result<Value, Connected
         {
             return Err(ConnectedAppError::SessionExpired);
         }
-        return Err(ConnectedAppError::Provider(format!("{method}: {text}")));
+        return Err(ConnectedAppError::Provider(format!(
+            "{method}: MCP error {code}"
+        )));
     }
     message
         .get("result")
         .cloned()
         .ok_or_else(|| ConnectedAppError::Provider(format!("{method}: missing result")))
+}
+
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    fn mock_server(modern: bool) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock MCP server");
+        let endpoint = format!("http://{}/mcp", listener.local_addr().expect("address"));
+        let requests = if modern { 2 } else { 4 };
+        let handle = std::thread::spawn(move || {
+            for _ in 0..requests {
+                let (mut stream, _) = listener.accept().expect("accept MCP request");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .expect("timeout");
+                let mut bytes = Vec::new();
+                let header_end = loop {
+                    let mut one = [0_u8; 1];
+                    stream.read_exact(&mut one).expect("request header");
+                    bytes.push(one[0]);
+                    if bytes.ends_with(b"\r\n\r\n") {
+                        break bytes.len();
+                    }
+                };
+                let header = String::from_utf8_lossy(&bytes[..header_end]);
+                let length = header
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                bytes.resize(header_end + length, 0);
+                stream
+                    .read_exact(&mut bytes[header_end..])
+                    .expect("request body");
+                let request: Value =
+                    serde_json::from_slice(&bytes[header_end..]).expect("JSON request");
+                let method = request
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .expect("method");
+                let id = request.get("id").cloned();
+                let body = match method {
+                    "server/discover" if modern => json!({
+                        "jsonrpc":"2.0", "id":id, "result":{"resultType":"complete",
+                        "_meta":{"io.modelcontextprotocol/serverInfo":{"name":"modern"}}}
+                    }),
+                    "server/discover" => json!({"jsonrpc":"2.0","id":id,
+                        "error":{"code":-32601,"message":"method not found"}}),
+                    "initialize" => json!({"jsonrpc":"2.0","id":id,"result":{
+                        "protocolVersion":LEGACY_PROTOCOL_VERSION,"serverInfo":{"name":"legacy"}}}),
+                    "notifications/initialized" => json!({}),
+                    "tools/list" => json!({"jsonrpc":"2.0","id":id,"result":{
+                        "tools":[{"name":"echo.read"}]}}),
+                    _ => panic!("unexpected method {method}"),
+                };
+                let body = serde_json::to_vec(&body).expect("response JSON");
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).expect("response headers");
+                stream.write_all(&body).expect("response body");
+            }
+        });
+        (endpoint, handle)
+    }
+
+    #[tokio::test]
+    async fn negotiates_modern_and_legacy_mcp_without_mixing_wire_eras() {
+        for modern in [true, false] {
+            let (endpoint, server) = mock_server(modern);
+            let (server_info, tools) = McpDiscoveryClient::default()
+                .discover(&endpoint, "test-token", Duration::from_secs(5), true)
+                .await
+                .expect("discover MCP server");
+            assert_eq!(
+                server_info["name"],
+                if modern { "modern" } else { "legacy" }
+            );
+            assert_eq!(tools[0]["name"], "echo.read");
+            server.join().expect("mock server finished");
+        }
+    }
 }
