@@ -210,7 +210,9 @@ impl MockPlayStationProviderClient {
                 name: "Elden Ring".into(),
                 platform: "PS5".into(),
                 category: "ps5_native_game".into(),
-                image_url: Some("https://image.api.playstation.com/vulcan/ap/rnd/elden_ring.png".into()),
+                image_url: Some(
+                    "https://image.api.playstation.com/vulcan/ap/rnd/elden_ring.png".into(),
+                ),
                 first_played_at: Some(now - Duration::days(30)),
                 last_played_at: now - Duration::hours(2),
                 play_duration_seconds: 14400, // 4 hours
@@ -221,7 +223,9 @@ impl MockPlayStationProviderClient {
                 name: "Demon's Souls".into(),
                 platform: "PS5".into(),
                 category: "ps5_native_game".into(),
-                image_url: Some("https://image.api.playstation.com/vulcan/ap/rnd/demons_souls.png".into()),
+                image_url: Some(
+                    "https://image.api.playstation.com/vulcan/ap/rnd/demons_souls.png".into(),
+                ),
                 first_played_at: Some(now - Duration::days(60)),
                 last_played_at: now - Duration::days(1),
                 play_duration_seconds: 7200, // 2 hours
@@ -232,7 +236,9 @@ impl MockPlayStationProviderClient {
                 name: "Astro's Playroom".into(),
                 platform: "PS5".into(),
                 category: "ps5_native_game".into(),
-                image_url: Some("https://image.api.playstation.com/vulcan/ap/rnd/astros.png".into()),
+                image_url: Some(
+                    "https://image.api.playstation.com/vulcan/ap/rnd/astros.png".into(),
+                ),
                 first_played_at: Some(now - Duration::days(90)),
                 last_played_at: now - Duration::days(3),
                 play_duration_seconds: 5400,
@@ -250,10 +256,16 @@ impl PlayStationProviderClient for MockPlayStationProviderClient {
         _access_token: &str,
         limit: usize,
     ) -> Result<Vec<PlayStationGame>, PlayStationError> {
-        if self.fail_with_rate_limit.load(std::sync::atomic::Ordering::SeqCst) {
+        if self
+            .fail_with_rate_limit
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
             return Err(PlayStationError::RateLimited(30));
         }
-        if self.fail_with_unauthorized.load(std::sync::atomic::Ordering::SeqCst) {
+        if self
+            .fail_with_unauthorized
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
             return Err(PlayStationError::ReconnectRequired);
         }
 
@@ -309,7 +321,14 @@ impl PlayStationService {
                     effect: CapabilityEffect::Read,
                     access_needs: vec!["recently_played".into()],
                     data_recipients: vec!["m.np.playstation.com".into()],
-                    regions: vec!["US".into(), "GB".into(), "CA".into(), "JP".into(), "EU".into(), "IN".into()],
+                    regions: vec![
+                        "US".into(),
+                        "GB".into(),
+                        "CA".into(),
+                        "JP".into(),
+                        "EU".into(),
+                        "IN".into(),
+                    ],
                     failure_modes: vec!["reconnect_required".into(), "rate_limited".into()],
                     optional_guarantees: json!({
                         "freshness_seconds": 300,
@@ -322,7 +341,14 @@ impl PlayStationService {
                     effect: CapabilityEffect::Read,
                     access_needs: vec!["game_activity".into()],
                     data_recipients: vec!["m.np.playstation.com".into()],
-                    regions: vec!["US".into(), "GB".into(), "CA".into(), "JP".into(), "EU".into(), "IN".into()],
+                    regions: vec![
+                        "US".into(),
+                        "GB".into(),
+                        "CA".into(),
+                        "JP".into(),
+                        "EU".into(),
+                        "IN".into(),
+                    ],
                     failure_modes: vec!["reconnect_required".into(), "rate_limited".into()],
                     optional_guarantees: json!({
                         "freshness_seconds": 300,
@@ -343,15 +369,15 @@ impl PlayStationService {
         connection_id: Uuid,
         limit: usize,
     ) -> Result<PlayStationRecentActivityResponse, PlayStationError> {
-        let connection = self
-            .connections
-            .get(context, connection_id)
-            .await
-            .map_err(|e| match e {
-                ConnectionError::NotFound => PlayStationError::ConnectionNotFound,
-                ConnectionError::Database(err) => PlayStationError::Database(err),
-                _ => PlayStationError::ConnectionNotFound,
-            })?;
+        let connection =
+            self.connections
+                .get(context, connection_id)
+                .await
+                .map_err(|e| match e {
+                    ConnectionError::NotFound => PlayStationError::ConnectionNotFound,
+                    ConnectionError::Database(err) => PlayStationError::Database(err),
+                    _ => PlayStationError::ConnectionNotFound,
+                })?;
 
         if connection.integration_external_key != PLAYSTATION_INTEGRATION_KEY {
             return Err(PlayStationError::InvalidIntegration);
@@ -571,15 +597,15 @@ impl PlayStationActivityWorker {
         connection_id: Uuid,
         limit: usize,
     ) -> Result<PlayStationSyncResult, PlayStationError> {
-        let connection = self
-            .connections
-            .get(context, connection_id)
-            .await
-            .map_err(|e| match e {
-                ConnectionError::NotFound => PlayStationError::ConnectionNotFound,
-                ConnectionError::Database(err) => PlayStationError::Database(err),
-                _ => PlayStationError::ConnectionNotFound,
-            })?;
+        let connection =
+            self.connections
+                .get(context, connection_id)
+                .await
+                .map_err(|e| match e {
+                    ConnectionError::NotFound => PlayStationError::ConnectionNotFound,
+                    ConnectionError::Database(err) => PlayStationError::Database(err),
+                    _ => PlayStationError::ConnectionNotFound,
+                })?;
 
         if connection.integration_external_key != PLAYSTATION_INTEGRATION_KEY {
             return Err(PlayStationError::InvalidIntegration);
@@ -647,7 +673,9 @@ impl PlayStationActivityWorker {
 }
 
 /// Helper function to parse JSON response from PlayStation Network gamelist endpoints.
-fn parse_titles_from_json(body: &serde_json::Value) -> Result<Vec<PlayStationGame>, PlayStationError> {
+fn parse_titles_from_json(
+    body: &serde_json::Value,
+) -> Result<Vec<PlayStationGame>, PlayStationError> {
     let titles_array = if let Some(titles) = body.get("titles").and_then(|t| t.as_array()) {
         titles
     } else if let Some(arr) = body.as_array() {
@@ -718,15 +746,10 @@ fn parse_titles_from_json(body: &serde_json::Value) -> Result<Vec<PlayStationGam
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(Utc::now);
 
-        let play_duration_seconds = parse_play_duration(
-            item.get("playDuration")
-                .unwrap_or(&serde_json::Value::Null),
-        );
+        let play_duration_seconds =
+            parse_play_duration(item.get("playDuration").unwrap_or(&serde_json::Value::Null));
 
-        let play_count = item
-            .get("playCount")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1) as u32;
+        let play_count = item.get("playCount").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
 
         result.push(PlayStationGame {
             title_id,
@@ -846,11 +869,8 @@ mod tests {
             play_count: 10,
         }];
 
-        let spans = PlayStationActivityWorker::extract_spans_from_games(
-            user_id,
-            user_context_id,
-            &games,
-        );
+        let spans =
+            PlayStationActivityWorker::extract_spans_from_games(user_id, user_context_id, &games);
 
         assert_eq!(spans.len(), 1);
         let span = &spans[0];
