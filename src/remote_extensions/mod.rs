@@ -204,6 +204,9 @@ pub struct ExtensionOperator {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ExtensionCapability {
+    pub input_schema: Value,
+    #[serde(default)]
+    pub supported_regions: Vec<String>,
     pub external_key: String,
     pub display_name: String,
     pub effect: ExtensionEffect,
@@ -411,6 +414,15 @@ impl RemoteExtensionService {
         }
         let mut keys = std::collections::HashSet::new();
         for capability in capabilities {
+            if capability.input_schema.get("type").and_then(Value::as_str) != Some("object")
+                || capability.input_schema.to_string().len() > 32_768
+                || !crate::conformance::local_schema(&capability.input_schema)
+                || jsonschema::validator_for(&capability.input_schema).is_err()
+                || capability.supported_regions.len() > 100
+            {
+                return Err(RemoteExtensionError::Invalid);
+            }
+
             let key = Self::validate_key(&capability.external_key)?;
             if key != capability.external_key
                 || !keys.insert(key)
@@ -1035,6 +1047,7 @@ impl RemoteExtensionService {
             .await?;
         revoke_extension_authority(&mut tx, extension_id).await?;
 
+        crate::packages::detach_package_skills(&mut tx, extension_id).await?;
         tx.commit().await?;
         self.get(context, extension_id).await
     }
@@ -1244,6 +1257,8 @@ mod manifest_tests {
 
     fn read_capability() -> ExtensionCapability {
         ExtensionCapability {
+            input_schema: serde_json::json!({"type":"object"}),
+            supported_regions: vec![],
             external_key: "weather.read".into(),
             display_name: "Read weather".into(),
             effect: ExtensionEffect::Read,

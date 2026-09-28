@@ -7,4 +7,7 @@ pub mod integration_registry;
 pub mod packages;
 pub mod providers;
 pub mod remote_extensions;
+pub mod skill_format;
 pub mod skills;
+
+pub mod defaults;

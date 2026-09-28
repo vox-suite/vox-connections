@@ -149,6 +149,55 @@ impl ConnectedAppsService {
         self
     }
 
+    /// Connect a reviewed public server, without creating or handling a token.
+    pub async fn connect_public(
+        &self,
+        context: &impl RequestScope,
+        id: Uuid,
+    ) -> Result<RemoteExtension, ConnectedAppError> {
+        let extension = self.extensions.get(context, id).await?;
+        let metadata: Value = sqlx::query_scalar("SELECT p.metadata FROM connector_package_installations i JOIN connector_packages p USING(deployment_id,external_key,version) WHERE i.extension_id=$1 AND p.enabled").bind(id).fetch_optional(&self.db).await?.ok_or(ConnectedAppError::Invalid)?;
+        if metadata.get("auth_mode").and_then(Value::as_str) != Some("none")
+            || extension.lifecycle_state != crate::remote_extensions::LifecycleState::Active
+        {
+            return Err(ConnectedAppError::Invalid);
+        }
+        let (info, tools) = self
+            .discovery
+            .discover(
+                &extension.endpoint_url,
+                "",
+                CONNECT_TIMEOUT,
+                self.allow_local,
+            )
+            .await?;
+        if info.get("vox_protocol_version") != metadata.get("protocol_version") {
+            return Err(ConnectedAppError::Invalid);
+        }
+        let mut tx = self.db.begin().await?;
+        let valid: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM remote_extensions WHERE id=$1 AND user_context_id=$2 AND endpoint_url=$3 AND current_version=$4 AND lifecycle_state='active' AND consent_status='consented' FOR UPDATE)").bind(id).bind(context.request_context().id.0).bind(&extension.endpoint_url).bind(extension.current_version).fetch_one(&mut *tx).await?;
+        if !valid || !crate::packages::installed_package_available(&mut *tx, id).await? {
+            return Err(ConnectedAppError::Expired);
+        }
+        sqlx::query("INSERT INTO remote_extension_credentials (extension_id,issuer,token_endpoint,client_id,resource,auth_mode,access_token_ciphertext,server_info,tools) VALUES ($1,'','','',$2,'none',NULL,$3,$4) ON CONFLICT(extension_id) DO UPDATE SET auth_mode='none',access_token_ciphertext=NULL,refresh_token_ciphertext=NULL,server_info=EXCLUDED.server_info,tools=EXCLUDED.tools,tools_refreshed_at=now(),updated_at=now()")
+            .bind(id).bind(&extension.endpoint_url).bind(info).bind(json!(tools)).execute(&mut *tx).await?;
+        let authorized: Vec<String> = extension
+            .capabilities
+            .iter()
+            .filter(|cap| {
+                tools
+                    .iter()
+                    .any(|t| t.get("name").and_then(Value::as_str) == Some(&cap.external_key))
+            })
+            .map(|c| c.external_key.clone())
+            .collect();
+        let hash = Sha256::digest(extension.endpoint_url.as_bytes()).to_vec();
+        sqlx::query("INSERT INTO external_connections (user_context_id,remote_extension_id,external_account_hash,account_display_id,credential_custody,authorization_state,authorized_capabilities) VALUES ($1,$2,$3,'Public access','none','authorized',$4) ON CONFLICT(user_context_id,remote_extension_id) WHERE remote_extension_id IS NOT NULL DO UPDATE SET authorization_state='authorized',authorized_capabilities=EXCLUDED.authorized_capabilities,revoked_at=NULL,expires_at=NULL,failure_code=NULL,updated_at=now()")
+            .bind(context.request_context().id.0).bind(id).bind(hash).bind(authorized).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(extension)
+    }
+
     /// MCP endpoint hosts that have an OAuth client configured out of band.
     pub fn configured_hosts(&self) -> Vec<String> {
         let mut hosts: Vec<String> = self.configured.keys().cloned().collect();
@@ -200,6 +249,10 @@ impl ConnectedAppsService {
             return Err(ConnectedAppError::Invalid);
         }
 
+        let public: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM connector_package_installations i JOIN connector_packages p USING(deployment_id,external_key,version) WHERE i.extension_id=$1 AND p.metadata->>'auth_mode'='none')").bind(extension_id).fetch_one(&self.db).await?;
+        if public {
+            return Err(ConnectedAppError::Invalid);
+        }
         let configured = self.configured_for(&endpoint);
         let discovery = oauth::discover(&endpoint, configured, self.allow_local).await?;
         let client_id = match configured {
@@ -553,6 +606,16 @@ impl ConnectedAppsService {
         if !crate::packages::installed_package_available(&mut *tx, extension_id).await? {
             return Err(ConnectedAppError::Expired);
         }
+        let metadata: Option<Value> = sqlx::query_scalar("SELECT p.metadata FROM connector_package_installations i JOIN connector_packages p USING(deployment_id,external_key,version) WHERE i.extension_id=$1")
+            .bind(extension_id).fetch_optional(&mut *tx).await?;
+        if metadata.is_some_and(|metadata| {
+            metadata.get("auth_mode").and_then(Value::as_str) != Some("oauth")
+                || metadata.get("credential_custody").and_then(Value::as_str)
+                    != Some("platform_held")
+                || metadata.get("protocol_version") != server_info.get("vox_protocol_version")
+        }) {
+            return Err(ConnectedAppError::Invalid);
+        }
         let session_still_valid: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM mcp_authorization_sessions \
              WHERE id=$1 AND extension_id=$2 AND consumed_at IS NOT NULL)",
@@ -571,7 +634,7 @@ impl ConnectedAppsService {
                         server_info, tools
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     ON CONFLICT (extension_id) DO UPDATE SET
-                        issuer = EXCLUDED.issuer, token_endpoint = EXCLUDED.token_endpoint,
+                        auth_mode = 'oauth', issuer = EXCLUDED.issuer, token_endpoint = EXCLUDED.token_endpoint,
                         client_id = EXCLUDED.client_id, resource = EXCLUDED.resource,
                         access_token_ciphertext = EXCLUDED.access_token_ciphertext,
                         refresh_token_ciphertext = EXCLUDED.refresh_token_ciphertext,
@@ -605,7 +668,14 @@ impl ConnectedAppsService {
             .collect();
         let authorized: Vec<String> = declared
             .into_iter()
-            .filter(|capability| reported.contains(capability.external_key.as_str()))
+            .filter(|capability| {
+                reported.contains(capability.external_key.as_str())
+                    && tools.iter().any(|tool| {
+                        tool.get("name").and_then(Value::as_str)
+                            == Some(capability.external_key.as_str())
+                            && tool.get("inputSchema") == Some(&capability.input_schema)
+                    })
+            })
             .map(|capability| capability.external_key)
             .collect();
         let mut account_hasher = Sha256::new();
@@ -683,6 +753,46 @@ impl ConnectedAppsService {
 
     /// A host-facing read seam. The server, not the model, resolves the
     /// connection, selected agent, declaration, grant and OAuth credential.
+    /// Lightweight discovery uses the same reviewed schemas and availability
+    /// checks as dispatch. It confers no reusable execution authority.
+    pub async fn tools_for_agent(
+        &self,
+        context: &impl RequestScope,
+        agent: &str,
+    ) -> Result<Vec<Value>, ConnectedAppError> {
+        let effective = crate::capability_grants::CapabilityGrantService::new(self.db.clone())
+            .effective_for_agent(&context.request_context(), agent)
+            .await
+            .map_err(|_| ConnectedAppError::GrantRequired)?;
+        let rows: Vec<(Uuid,Uuid,Value,Value)>=sqlx::query_as("SELECT x.id,e.id,c.tools,v.capabilities FROM external_connections x JOIN remote_extensions e ON e.id=x.remote_extension_id JOIN remote_extension_credentials c ON c.extension_id=e.id JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version WHERE x.user_context_id=$1 AND x.authorization_state='authorized' AND (x.expires_at IS NULL OR x.expires_at>now()) AND (c.expires_at IS NULL OR c.expires_at>now()) AND e.lifecycle_state='active' AND e.consent_status='consented' AND e.operator_enabled AND e.conformance_status='passed' ORDER BY x.id LIMIT 101")
+            .bind(context.request_context().id.0).fetch_all(&self.db).await?;
+        if rows.len() > 100 {
+            return Err(ConnectedAppError::Invalid);
+        }
+        let mut tools = Vec::new();
+        for (connection_id, extension_id, inventory, declarations) in rows {
+            if !crate::packages::installed_package_available(&self.db, extension_id).await? {
+                continue;
+            }
+            let caps: Vec<ExtensionCapability> =
+                serde_json::from_value(declarations).map_err(|_| ConnectedAppError::Invalid)?;
+            for cap in caps {
+                if effective.iter().any(|grant| {
+                    grant.connection_id == connection_id
+                        && grant.capability_external_key == cap.external_key
+                }) && inventory.as_array().is_some_and(|items| {
+                    items.iter().any(|tool| {
+                        tool.get("name").and_then(Value::as_str) == Some(&cap.external_key)
+                            && tool.get("inputSchema") == Some(&cap.input_schema)
+                    })
+                }) {
+                    tools.push(json!({"connection_id":connection_id,"name":cap.external_key,"description":cap.display_name,"input_schema":cap.input_schema,"effect":cap.effect,"approval_required":cap.consequential,"data_recipients":cap.data_recipients}));
+                }
+            }
+        }
+        Ok(tools)
+    }
+
     pub async fn read_tool(
         &self,
         context: &impl RequestScope,
@@ -742,13 +852,14 @@ impl ConnectedAppsService {
         let mut tx = self.db.begin().await?;
         let row = sqlx::query(
             "SELECT e.id AS extension_id,e.endpoint_url,e.conformance_status,e.operator_enabled,v.capabilities, \
-                    c.access_token_ciphertext,c.tools \
+                    c.access_token_ciphertext,c.auth_mode,c.tools \
              FROM external_connections x \
              JOIN remote_extensions e ON e.id=x.remote_extension_id AND e.user_context_id=x.user_context_id \
              JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version \
              JOIN remote_extension_credentials c ON c.extension_id=e.id \
              WHERE x.id=$1 AND x.user_context_id=$2 AND x.authorization_state='authorized' \
                AND (x.expires_at IS NULL OR x.expires_at>now()) \
+               AND (c.expires_at IS NULL OR c.expires_at>now()) \
                AND $3=ANY(x.authorized_capabilities) \
                AND e.lifecycle_state='active' AND e.consent_status='consented' \
                AND EXISTS (SELECT 1 FROM agent_capability_grants g \
@@ -775,6 +886,11 @@ impl ConnectedAppsService {
             .iter()
             .find(|cap| cap.external_key == tool_name)
             .ok_or(ConnectedAppError::UnknownTool)?;
+        let validator =
+            jsonschema::validator_for(&cap.input_schema).map_err(|_| ConnectedAppError::Invalid)?;
+        if !validator.is_valid(&arguments) {
+            return Err(ConnectedAppError::Invalid);
+        }
         let consequential = cap.consequential || cap.effect.is_consequential();
         if consequential && !approved_write {
             return Err(ConnectedAppError::WriteRequiresApproval);
@@ -788,9 +904,10 @@ impl ConnectedAppsService {
         }
         let reported: Value = row.get("tools");
         if !reported.as_array().is_some_and(|tools| {
-            tools
-                .iter()
-                .any(|tool| tool.get("name").and_then(Value::as_str) == Some(tool_name))
+            tools.iter().any(|tool| {
+                tool.get("name").and_then(Value::as_str) == Some(tool_name)
+                    && tool.get("inputSchema") == Some(&cap.input_schema)
+            })
         }) {
             return Err(ConnectedAppError::UnknownTool);
         }
@@ -799,17 +916,30 @@ impl ConnectedAppsService {
         if !crate::packages::installed_package_available(&mut *tx, extension_id).await? {
             return Err(ConnectedAppError::GrantRequired);
         }
-        let token = self.cipher()?.open(
-            &aad(extension_id, "access"),
-            &row.get::<Vec<u8>, _>("access_token_ciphertext"),
-        )?;
+        let token = if row.get::<String, _>("auth_mode") == "none" {
+            let public: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM connector_package_installations i JOIN connector_packages p USING(deployment_id,external_key,version) WHERE i.extension_id=$1 AND p.enabled AND p.metadata->>'auth_mode'='none')").bind(extension_id).fetch_one(&mut *tx).await?;
+            if !public {
+                return Err(ConnectedAppError::GrantRequired);
+            }
+            String::new()
+        } else {
+            self.cipher()?.open(
+                &aad(extension_id, "access"),
+                &row.get::<Vec<u8>, _>("access_token_ciphertext"),
+            )?
+        };
+        let expected_protocol: Option<String> = sqlx::query_scalar("SELECT p.metadata->>'protocol_version' FROM connector_package_installations i JOIN connector_packages p USING(deployment_id,external_key,version) WHERE i.extension_id=$1")
+            .bind(extension_id).fetch_optional(&mut *tx).await?;
         let result = self
             .discovery
             .call_tool(
                 &endpoint,
                 &token,
-                tool_name,
-                arguments,
+                mcp::ToolCall {
+                    name: tool_name,
+                    expected_protocol: expected_protocol.as_deref(),
+                    arguments,
+                },
                 CONNECT_TIMEOUT,
                 self.allow_local,
             )

@@ -6,6 +6,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
@@ -59,6 +60,9 @@ pub struct LoadedSkill {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SkillVersion {
+    pub title: String,
+    pub summary: String,
+    pub digest: String,
     pub version: i32,
     pub instructions: String,
     pub requested_capabilities: Vec<String>,
@@ -148,9 +152,17 @@ impl SkillService {
         request: PublishSkillRequest,
     ) -> Result<Uuid, SkillError> {
         validate(&request)?;
+        let digest = content_digest(&request)?;
         let mut tx = self.db.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!(
+                "skill-publish:{deployment_id}:{owner:?}:{}",
+                request.external_key
+            ))
+            .execute(&mut *tx)
+            .await?;
         let existing = sqlx::query(
-            "SELECT id, latest_version FROM skill_packages
+            "SELECT id, latest_version, state FROM skill_packages
              WHERE deployment_id=$1 AND external_key=$2
              AND owner_user_context_id IS NOT DISTINCT FROM $3
              FOR UPDATE",
@@ -162,7 +174,22 @@ impl SkillService {
         .await?;
         let (id, version) = if let Some(row) = existing {
             let id: Uuid = row.get("id");
-            let version: i32 = row.get::<i32, _>("latest_version") + 1;
+            if row.get::<String, _>("state") != "active" {
+                return Err(SkillError::NotFound);
+            }
+            let latest: i32 = row.get("latest_version");
+            let previous: Option<String> = sqlx::query_scalar(
+                "SELECT digest FROM skill_package_versions WHERE skill_id=$1 AND version=$2",
+            )
+            .bind(id)
+            .bind(latest)
+            .fetch_one(&mut *tx)
+            .await?;
+            if previous.as_deref() == Some(&digest) {
+                tx.commit().await?;
+                return Ok(id);
+            }
+            let version = latest + 1;
             sqlx::query(
                 "UPDATE skill_packages SET title=$2, summary=$3, latest_version=$4,
                  state='active', updated_at=now() WHERE id=$1",
@@ -191,14 +218,17 @@ impl SkillService {
         };
         sqlx::query(
             "INSERT INTO skill_package_versions
-             (skill_id,version,instructions,requested_capabilities,resources)
-             VALUES ($1,$2,$3,$4,$5)",
+             (skill_id,version,instructions,requested_capabilities,resources,title,summary,digest)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
         )
         .bind(id)
         .bind(version)
         .bind(&request.instructions)
         .bind(&request.requested_capabilities)
         .bind(&request.resources)
+        .bind(&request.title)
+        .bind(&request.summary)
+        .bind(&digest)
         .execute(&mut *tx)
         .await?;
         if let Some(owner) = owner {
@@ -260,7 +290,7 @@ impl SkillService {
         version: i32,
     ) -> Result<SkillVersion, SkillError> {
         let row = sqlx::query(
-            "SELECT v.version,v.instructions,v.requested_capabilities,v.resources
+            "SELECT v.version,v.instructions,v.requested_capabilities,v.resources,v.title,v.summary,v.digest
              FROM skill_package_versions v JOIN skill_packages s ON s.id=v.skill_id
              WHERE s.id=$1 AND v.version=$2 AND s.deployment_id=$3
                AND s.state='active'
@@ -273,11 +303,22 @@ impl SkillService {
         .fetch_optional(&self.db)
         .await?
         .ok_or(SkillError::NotFound)?;
+        let title: String = row.try_get("title")?;
+        let summary: String = row.try_get("summary")?;
+        let instructions: String = row.try_get("instructions")?;
+        let capabilities: Vec<String> = row.try_get("requested_capabilities")?;
+        let resources: Value = row.try_get("resources")?;
+        let digest = row
+            .try_get::<Option<String>, _>("digest")?
+            .ok_or(SkillError::NotFound)?;
         Ok(SkillVersion {
+            title,
+            summary,
+            digest,
             version: row.try_get("version")?,
-            instructions: row.try_get("instructions")?,
-            requested_capabilities: row.try_get("requested_capabilities")?,
-            resources: row.try_get("resources")?,
+            instructions,
+            requested_capabilities: capabilities,
+            resources,
         })
     }
 
@@ -286,6 +327,17 @@ impl SkillService {
         context: &impl RequestScope,
         skill_id: Uuid,
         reviewed_version: i32,
+    ) -> Result<(), SkillError> {
+        self.install_for_agent(context, skill_id, reviewed_version, None)
+            .await
+    }
+
+    pub async fn install_for_agent(
+        &self,
+        context: &impl RequestScope,
+        skill_id: Uuid,
+        reviewed_version: i32,
+        agent_key: Option<&str>,
     ) -> Result<(), SkillError> {
         if reviewed_version < 1 {
             return Err(SkillError::Invalid);
@@ -308,16 +360,20 @@ impl SkillService {
         }
         sqlx::query(
             "INSERT INTO skill_installations
-             (user_context_id,skill_id,installed_version,enabled)
-             VALUES ($1,$2,$3,true)
+             (user_context_id,skill_id,installed_version,enabled,independently_installed)
+             VALUES ($1,$2,$3,true,true)
              ON CONFLICT (user_context_id,skill_id) DO UPDATE
-             SET installed_version=EXCLUDED.installed_version,enabled=true,updated_at=now()",
+             SET installed_version=EXCLUDED.installed_version,enabled=true,independently_installed=true,updated_at=now()",
         )
         .bind(context.request_context().id.0)
         .bind(skill_id)
         .bind(version)
         .execute(&mut *tx)
         .await?;
+        if let Some(key) = agent_key {
+            let agent: Uuid=sqlx::query_scalar("SELECT a.id FROM agent_definitions a JOIN deployment_agent_selections s ON s.agent_definition_id=a.id WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled'").bind(context.request_context().subject.deployment_id.0).bind(key).fetch_optional(&mut *tx).await?.ok_or(SkillError::NotFound)?;
+            sqlx::query("INSERT INTO skill_agent_enablements(user_context_id,skill_id,agent_definition_id,enabled) VALUES ($1,$2,$3,true) ON CONFLICT(user_context_id,skill_id,agent_definition_id) DO UPDATE SET enabled=true,updated_at=now()").bind(context.request_context().id.0).bind(skill_id).bind(agent).execute(&mut *tx).await?;
+        }
         tx.commit().await?;
         Ok(())
     }
@@ -414,7 +470,7 @@ impl SkillService {
             .map(|grant| grant.capability_external_key)
             .collect();
         let rows = sqlx::query(
-            "SELECT s.id,s.external_key,s.title,s.summary,i.installed_version,
+            "SELECT s.id,s.external_key,v.title,v.summary,i.installed_version,
                     v.requested_capabilities
              FROM skill_installations i JOIN skill_agent_enablements e
                ON e.user_context_id=i.user_context_id AND e.skill_id=i.skill_id
@@ -479,7 +535,7 @@ impl SkillService {
     }
 }
 
-fn validate(request: &PublishSkillRequest) -> Result<(), SkillError> {
+pub fn validate(request: &PublishSkillRequest) -> Result<(), SkillError> {
     let key = request.external_key.as_str();
     if key.is_empty()
         || key.len() > 128
@@ -528,4 +584,12 @@ fn contains_secret(value: &str) -> bool {
     ]
     .iter()
     .any(|marker| lower.contains(marker))
+}
+
+/// Digests cover all content presented for review; package identity is stored separately.
+pub fn content_digest(request: &PublishSkillRequest) -> Result<String, SkillError> {
+    let value = serde_json::json!({"title":request.title,"summary":request.summary,"instructions":request.instructions,"requested_capabilities":request.requested_capabilities,"resources":request.resources});
+    serde_json::to_vec(&value)
+        .map(|bytes| hex::encode(Sha256::digest(bytes)))
+        .map_err(|_| SkillError::Invalid)
 }

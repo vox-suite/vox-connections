@@ -1,111 +1,19 @@
-# Publish and install a connector
+# Connector package authoring and installation
 
-The same Rust `PackageRegistry` powers independent hosts and Core's HTTP API.
-Adding an MCP connector needs a manifest, review evidence and publication. No
-Core router, provider implementation or Web catalog entry is required for a
-server that already implements the supported MCP/OAuth contracts.
-
-## Publisher and operator
-
-1. Copy `examples/mcp/read-only-manifest.json`. Declare the real endpoint,
-   operator, tool names, effects, data recipients and access needs.
-2. Run `cargo run --bin vox-connector-check -- path/to/manifest.json`.
-   The command validates the declaration and prints its SHA-256 digest; it
-   does not prove the provider's behavior.
-3. Independently review the provider implementation, declared effects and
-   recipients. The authenticated deployment operator publishes:
-
-```http
-POST /v1/connector-packages/publish
-Authorization: Bearer <Core operator token>
-Content-Type: application/json
-```
-
-```json
-{
-  "deployment_id": "<deployment UUID>",
-  "version": 1,
-  "manifest": "<the manifest JSON object, not a string>",
-  "review": {
-    "read_effects_verified": true,
-    "evidence": {"reviewer": "<operator identity>", "report": "<review evidence reference>"}
-  }
-}
-```
-
-Replace `manifest` with the complete object. The published result returns
-`version`, `digest` and `manifest`. The digest covers the canonical typed
-manifest bytes. Publication rejects a different declaration for an existing
-(deployment, external key, version), including withdrawn versions. Identical
-publication is idempotent and preserves the original review and withdrawal.
-Neither a developer's local check nor an OAuth callback can attest conformance.
-
-Only a nonempty, exclusively read declaration with explicit operator effect
-verification and evidence can inherit reviewed read conformance at install.
-Consequential declarations remain pending and disabled until the operator's
-behavioral conformance and enablement process completes. Do not claim that a
-server-supplied tool annotation proves an effect or a provider outcome.
-OAuth providers requiring a preregistered client still need deployment-owned
-client configuration and an approved canonical callback URI; secrets are never
-part of a package.
-
-## Consuming host
-
-The Web catalog consumes the same routes as any signed, registered host:
-
-- `POST /v1/connector-packages/list` with `host_context` returns the latest
-  enabled version of up to 100 packages in that context's deployment.
-- `POST /v1/connector-packages/install` with `host_context`, `external_key`,
-  `version` and `digest` installs exactly the declaration the user selected.
-  A manifest-only connector appears automatically, using initials when no
-  optional Web brand asset exists.
-- One Connect click installs and starts provider OAuth. Returning from OAuth
-  links the account. The user then chooses agent access and capabilities;
-  installation and account linking never create an agent grant.
-- Discover effective grants and enabled skills for the selected agent, load
-  skill content through the signed skill-loading route, and invoke granted
-  reads or proposal-bound consequential executions through the existing
-  [Core connection contract](https://github.com/vox-suite/vox-core/blob/main/docs/connections.md).
-  Skills cannot provide credentials or action authority.
-
-Installation serializes retries across processes with a PostgreSQL transaction
-lock scoped to the user context. Extension creation, reviewed read activation
-and package binding commit together using one pool connection. A changed
-existing declaration conflicts; the install route never silently replaces an
-endpoint or expands old grants. Material upgrades currently require the
-explicit extension update/reconsent/reconnect/regrant journey. A disabled or
-quarantined installation is never revived by a catalog retry; it needs
-operator review or removal before a fresh installation.
-
-## Withdrawal and limits
-
-An authenticated operator calls `POST /v1/connector-packages/withdraw` with
-`deployment_id`, `external_key` and `version`. Withdrawal hides the package,
-blocks new installs, disables bound extensions, clears platform credentials
-and pending OAuth sessions, and revokes their accounts and agent grants in one
-transaction. Declarations and evidence remain readable. OAuth start, callback persistence, operator activation and both invocation
-paths share one withdrawn/mismatched package check. Session creation rechecks
-the endpoint/version under the extension lock after provider discovery. In-flight provider
-requests cannot be undone by deleting local credentials; provider-side
-revocation and consequential outcome reconciliation remain separate gates.
-
-This package contains a reviewed integration declaration. Optional bundled
-skill references, automatic material upgrades, conversation-level agent
-consumption and independent provider certification are not implemented by
-this publish/install API. Standalone skill authoring, pinning, per-agent
-loading and disablement remain available through `SkillService`.
-
-## Verification
-
-Apply the independent-host schema, `schema/connectors.sql` and
-`schema/packages.sql` to an isolated database, then run:
+A supported remote MCP connector needs one `vox-package.json` and optional `skills/<key>/SKILL.md`. Core and Web read the reviewed package dynamically; no provider-specific code change is needed. Installation never grants a connection, tool, or action approval.
 
 ```sh
-TEST_DATABASE_URL=postgres://... cargo test --test postgres_integration -- --ignored
+cargo run --bin vox -- package init ./my-integration
+# Edit the real endpoint, operator, auth/custody profile, tools, input schemas,
+# effects, recipients, supported regions, and any pinned skill digests.
+cargo run --bin vox -- package check ./my-integration
+cargo run --bin vox -- package test ./my-integration --sandbox
 ```
 
-The test covers immutable publication, digest mismatch, deployment isolation,
-concurrent idempotent installation with a one-connection pool, no implicit
-grants, and withdrawal with credential/account revocation. Web browser tests
-cover a connector with no compiled-in brand, one-click install, mocked OAuth
-return and the agent-access handoff; they are not live-provider certification.
+`package check` validates the full package and referenced local skills and prints the canonical digest. `package test` uses a local/test MCP endpoint and checks negotiated protocol, reported tool names and exact input schemas. Set `VOX_TEST_ACCESS_TOKEN` if the test server requires a credential. It does **not** certify provider effects, OAuth, production availability or consequential outcomes.
+
+The deployment operator independently reviews provider behavior and records `review.json`. With `VOX_OPERATOR_TOKEN` in the environment, `cargo run --bin vox -- package publish ./my-integration https://core.example <deployment-uuid>` publishes an immutable version through Core's operator route. Publication rejects changed bytes for an existing version and preserves withdrawals. Bundled skill references must already identify published curated, active skill versions with matching digests; publish those through the operator skill route before the package. Material package version changes conflict with existing installations until an explicit update/reconsent/reconnect journey clears old authority.
+
+A host lists `POST /v1/connector-packages/list`, installs the selected version/digest with `POST /v1/connector-packages/install`, then follows the declared auth mode: public MCP uses `connect-public`, OAuth uses a signed authorization callback. The user grants selected capabilities to a selected agent. MCP tool dispatch rechecks current package, connection, declared schema, reported schema, and grant. Consequential dispatch additionally requires the authenticated exact approval and a durable execution. A provider response alone is an unknown outcome until independently verified.
+
+For isolated database verification apply `examples/independent_host_schema.sql`, `schema/connectors.sql`, `schema/packages.sql`, `schema/skill-content.sql`, and `schema/public-mcp.sql` in that order, then run `TEST_DATABASE_URL=postgres://... cargo test --test postgres_integration -- --ignored`.

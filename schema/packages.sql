@@ -5,6 +5,7 @@ CREATE TABLE connector_packages (
     version INTEGER NOT NULL CHECK (version > 0),
     digest TEXT NOT NULL,
     manifest JSONB NOT NULL,
+    metadata JSONB NOT NULL,
     review JSONB NOT NULL CHECK (jsonb_typeof(review)='object' AND review <> '{}'::jsonb),
     enabled BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

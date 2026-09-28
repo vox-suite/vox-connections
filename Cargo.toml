@@ -21,3 +21,5 @@ base64 = "0.23.1"
 tokio = { version = "1.53.1", features = ["net", "time", "sync", "rt", "macros"] }
 ring = "0.17.14"
 tracing = "0.1"
+yaml_serde = "0.10.7"
+jsonschema = { version = "0.57", default-features = false }
