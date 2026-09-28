@@ -1,6 +1,6 @@
 # Add an MCP read tool: current developer path
 
-This is a local authoring path for the shared connector adapter's current `tools/call` subset. OAuth linking, dynamic tool discovery, context-owned connections, explicit agent grants, and a signed host read/write interface now exist. It is **not** a complete connect-and-use quickstart: authors must supply reviewed tool declarations, an agent must request the capability (or `*`) before a user can grant it, and operator conformance is not self-service. See the [Vox Core connection contract](https://github.com/vox-suite/vox-core/blob/main/docs/connections.md).
+This is a local authoring path for the shared connector adapter's current `tools/call` subset. OAuth linking, dynamic tool discovery, context-owned connections, explicit agent grants, and a signed host read/write interface now exist. For the reviewed catalog install path, use [publish, discover, install](packages.md). This advanced endpoint-registration path still requires operator onboarding: authors must supply reviewed tool declarations, an agent must request the capability (or `*`) before a user can grant it, and operator conformance is not self-service. See the [Vox Core connection contract](https://github.com/vox-suite/vox-core/blob/main/docs/connections.md).
 
 ## Run a deterministic local fixture
 
@@ -59,4 +59,4 @@ The registered host calls `POST /v1/remote-extensions` with a fresh host asserti
 }
 ```
 
-Installation creates a declaration in the caller's user context. It does not connect an external account, enable the operator, grant an agent access, or approve a write. A Core operator must independently attest conformance and enable the extension. Hosts cannot attest their own conformance or operator status. There is currently no public self-service process to obtain that attestation; production onboarding remains blocked until the release gates in the integration plan are implemented.
+Installation creates a declaration in the caller's user context. It does not connect an external account, enable the operator, grant an agent access, or approve a write. A Core operator must independently attest conformance and enable the extension. Hosts cannot attest their own conformance or operator status. Use the operator-reviewed package publication path to make verified read declarations available in the deployment catalog. Independent behavioral conformance and production-provider validation remain release gates.

@@ -16,6 +16,7 @@ Contains:
 | --- | --- |
 | `integration_registry` | Versioned, protocol-neutral integration declarations and deployment discovery |
 | `connections`, `capability_grants` | Context-owned `external_connections` records, revocation, and scoped grants; generic provider authorization is not yet implemented |
+| `packages` | Deployment-reviewed immutable manifests; atomic, digest-bound installation and withdrawal |
 | `remote_extensions` | User-added remote integration manifests, lifecycle, consent, conformance status, endpoint authorization |
 | `remote_extensions::adapters` | Direct and MCP transports, DNS and address checks, context minimization, integrity, response redaction, per-protocol switches |
 | `connected_apps` | Provider OAuth, encrypted credentials, and MCP tool discovery |
@@ -29,9 +30,11 @@ Provider adapters are separate modules. Hosts enable only the integrations and c
 
 A host resolves and authenticates its own user context, then implements `identity::RequestScope` to supply the minimal `RequestContext` (context ID, user ID, deployment ID). Services take `sqlx::PgPool`, not Vox Core's database wrapper. `ConnectedAppsService::from_options` accepts deployment-owned credential and OAuth settings through `ConnectedAppsOptions`; it never reads Vox environment variables. The host can construct and use the services without a Vox Core dependency; `tests/host_boundary.rs` compiles an independent host and checks the shared conformance and redaction contracts.
 
-Vox Core owns host trust, identity resolution, agent conversations, action proposals, approvals, execution, policy and audit. Its HTTP routes call this crate; conversation access to OAuth-linked tools awaits the governed grant and approval path. In particular, Core's Expedia lodging service retains proposal and execution orchestration, while the Expedia provider transport and data contracts live here. Core's thin re-exports preserve existing Rust API paths while its callers migrate.
+Vox Core owns host trust, identity resolution, agent conversations, action proposals, approvals, execution, policy and audit. Its HTTP routes call this crate; signed host access to OAuth-linked tools uses governed grants and exact consequential approvals. Conversation-level selected-agent consumption remains a release gate. In particular, Core's Expedia lodging service retains proposal and execution orchestration, while the Expedia provider transport and data contracts live here. Core calls the shared provider services through its host orchestration boundary.
 
 The [database contract](schema/README.md) includes a standalone reference schema for independent hosts. Vox Core keeps its incremental migrations. Schema compatibility must be checked when upgrading either repository.
+
+Package onboarding: [publish, discover, install](docs/packages.md). New MCP connectors require a manifest and operator publication; Core and Web code changes are unnecessary.
 
 Authoring guides: [MCP integration](docs/mcp-authoring.md) and [declarative skills](docs/declarative-skills.md). Their local probes and examples live in `tools/` and `examples/`.
 

@@ -728,6 +728,12 @@ impl ConnectedAppsService {
                AND (x.expires_at IS NULL OR x.expires_at>now()) \
                AND $3=ANY(x.authorized_capabilities) \
                AND e.lifecycle_state='active' AND e.consent_status='consented' \
+               AND NOT EXISTS (SELECT 1 FROM connector_package_installations pi \
+                   JOIN connector_packages p ON p.deployment_id=pi.deployment_id \
+                     AND p.external_key=pi.external_key AND p.version=pi.version \
+                   WHERE pi.extension_id=e.id AND (NOT p.enabled \
+                     OR p.manifest->>'endpoint_url'<>e.endpoint_url \
+                     OR p.manifest->'capabilities'<>v.capabilities)) \
                AND EXISTS (SELECT 1 FROM agent_capability_grants g \
                    JOIN agent_definitions a ON a.id=g.agent_definition_id \
                    JOIN deployment_agent_selections s ON s.agent_definition_id=a.id \

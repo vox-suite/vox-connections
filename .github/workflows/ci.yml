@@ -42,4 +42,5 @@ jobs:
           test "$(psql "$TEST_DATABASE_URL" -Atc 'SHOW server_version_num')" -ge 180000
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f examples/independent_host_schema.sql
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema/connectors.sql
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema/packages.sql
           cargo test --test postgres_integration -- --ignored
