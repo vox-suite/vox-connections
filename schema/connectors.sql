@@ -46,75 +46,14 @@ CREATE TABLE public.agent_capability_grants (
 
 
 --
--- Name: connected_app_pending_actions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.connected_app_pending_actions (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    user_id uuid NOT NULL,
-    extension_id uuid NOT NULL,
-    tool_name text NOT NULL,
-    arguments_hash text NOT NULL,
-    proposed_turn uuid NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    arguments jsonb DEFAULT '{}'::jsonb NOT NULL
-);
-
-
---
--- Name: connection_authorization_sessions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.connection_authorization_sessions (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    user_context_id uuid NOT NULL,
-    integration_id uuid NOT NULL,
-    state_token text NOT NULL,
-    credential_custody text DEFAULT 'external_operator'::text NOT NULL,
-    requested_capabilities text[] DEFAULT '{}'::text[] CONSTRAINT connection_authorization_sessio_requested_capabilities_not_null NOT NULL,
-    redirect_uri text,
-    expires_at timestamp with time zone NOT NULL,
-    consumed_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT conn_auth_sess_custody_valid CHECK ((credential_custody = ANY (ARRAY['platform_held'::text, 'external_operator'::text])))
-);
-
-
---
--- Name: connections; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.connections (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    user_id uuid NOT NULL,
-    provider_key text NOT NULL,
-    catalog_version text DEFAULT 'v1'::text NOT NULL,
-    external_account_hash text NOT NULL,
-    secret_reference text,
-    scopes text[] DEFAULT '{}'::text[] NOT NULL,
-    allowed_capabilities text[] DEFAULT '{}'::text[] NOT NULL,
-    authorization_state text DEFAULT 'authorized'::text NOT NULL,
-    expires_at timestamp with time zone,
-    revoked_at timestamp with time zone,
-    sync_cursor text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    user_context_id uuid,
-    CONSTRAINT connections_authorization_state_check CHECK ((authorization_state = ANY (ARRAY['pending'::text, 'authorized'::text, 'expired'::text, 'revoked'::text]))),
-    CONSTRAINT connections_context_presence CHECK (((user_id IS NULL) = (user_context_id IS NULL))),
-    CONSTRAINT connections_provider_key_check CHECK ((length(btrim(provider_key)) > 0))
-);
-
-
---
 -- Name: external_connections; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.external_connections (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     user_context_id uuid NOT NULL,
-    integration_id uuid NOT NULL,
+    integration_id uuid,
+    remote_extension_id uuid,
     external_account_hash bytea NOT NULL,
     credential_custody text NOT NULL,
     authorization_state text NOT NULL,
@@ -126,6 +65,7 @@ CREATE TABLE public.external_connections (
     revoked_at timestamp with time zone,
     account_display_id text,
     CONSTRAINT external_connections_account_hash_length CHECK ((octet_length(external_account_hash) = 32)),
+    CONSTRAINT external_connections_one_source CHECK (((integration_id IS NOT NULL) <> (remote_extension_id IS NOT NULL))),
     CONSTRAINT external_connections_custody_valid CHECK ((credential_custody = ANY (ARRAY['platform_held'::text, 'external_operator'::text]))),
     CONSTRAINT external_connections_expiry_shape CHECK (((authorization_state = 'authorized'::text) OR (expires_at IS NULL))),
     CONSTRAINT external_connections_failure_shape CHECK ((((authorization_state = 'failed'::text) AND (failure_code IS NOT NULL)) OR (authorization_state <> 'failed'::text))),
@@ -206,6 +146,30 @@ CREATE TABLE public.mcp_oauth_clients (
 
 
 --
+-- Name: mcp_authorization_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.mcp_authorization_sessions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    extension_id uuid NOT NULL,
+    user_context_id uuid NOT NULL,
+    state_hash text NOT NULL,
+    code_verifier_ciphertext bytea NOT NULL,
+    issuer text NOT NULL,
+    token_endpoint text NOT NULL,
+    client_id text NOT NULL,
+    redirect_uri text NOT NULL,
+    resource text NOT NULL,
+    endpoint_url text NOT NULL,
+    extension_version integer NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT mcp_authorization_sessions_version_positive CHECK ((extension_version > 0))
+);
+
+
+--
 -- Name: remote_extension_conformance_runs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -238,8 +202,7 @@ CREATE TABLE public.remote_extension_credentials (
     tools jsonb DEFAULT '[]'::jsonb NOT NULL,
     connected_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    tools_refreshed_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_used_at timestamp with time zone
+    tools_refreshed_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -374,59 +337,19 @@ ALTER TABLE ONLY public.agent_capability_grants
 
 
 --
--- Name: connected_app_pending_actions connected_app_pending_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connected_app_pending_actions
-    ADD CONSTRAINT connected_app_pending_actions_pkey PRIMARY KEY (id);
-
-
---
--- Name: connection_authorization_sessions connection_authorization_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connection_authorization_sessions
-    ADD CONSTRAINT connection_authorization_sessions_pkey PRIMARY KEY (id);
-
-
---
--- Name: connection_authorization_sessions connection_authorization_sessions_state_token_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connection_authorization_sessions
-    ADD CONSTRAINT connection_authorization_sessions_state_token_key UNIQUE (state_token);
-
-
---
--- Name: connections connections_id_user_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connections
-    ADD CONSTRAINT connections_id_user_key UNIQUE (id, user_id);
-
-
---
--- Name: connections connections_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connections
-    ADD CONSTRAINT connections_pkey PRIMARY KEY (id);
-
-
---
--- Name: connections connections_user_provider_account_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connections
-    ADD CONSTRAINT connections_user_provider_account_key UNIQUE (user_id, provider_key, external_account_hash);
-
-
---
 -- Name: external_connections external_connections_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.external_connections
     ADD CONSTRAINT external_connections_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: external_connections external_connections_id_context_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_connections
+    ADD CONSTRAINT external_connections_id_context_key UNIQUE (id, user_context_id);
 
 
 --
@@ -502,6 +425,22 @@ ALTER TABLE ONLY public.mcp_oauth_clients
 
 
 --
+-- Name: mcp_authorization_sessions mcp_authorization_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mcp_authorization_sessions
+    ADD CONSTRAINT mcp_authorization_sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: mcp_authorization_sessions mcp_authorization_sessions_state_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mcp_authorization_sessions
+    ADD CONSTRAINT mcp_authorization_sessions_state_hash_key UNIQUE (state_hash);
+
+
+--
 -- Name: remote_extension_conformance_runs remote_extension_conformance_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -539,6 +478,14 @@ ALTER TABLE ONLY public.remote_extension_versions
 
 ALTER TABLE ONLY public.remote_extensions
     ADD CONSTRAINT remote_extensions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: remote_extensions remote_extensions_id_context_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.remote_extensions
+    ADD CONSTRAINT remote_extensions_id_context_key UNIQUE (id, user_context_id);
 
 
 --
@@ -589,31 +536,14 @@ CREATE INDEX agent_capability_grants_context_agent_idx ON public.agent_capabilit
 
 
 --
--- Name: conn_auth_sess_state_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX conn_auth_sess_state_idx ON public.connection_authorization_sessions USING btree (state_token) WHERE (consumed_at IS NULL);
-
-
---
--- Name: connected_app_pending_actions_lookup; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX connected_app_pending_actions_lookup ON public.connected_app_pending_actions USING btree (user_id, extension_id, tool_name, arguments_hash);
-
-
---
--- Name: connections_context_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX connections_context_idx ON public.connections USING btree (user_context_id);
-
-
 --
 -- Name: external_connections_context_state_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX external_connections_context_state_idx ON public.external_connections USING btree (user_context_id, authorization_state);
+
+
+CREATE UNIQUE INDEX external_connections_one_account_per_remote_extension ON public.external_connections USING btree (user_context_id, remote_extension_id) WHERE (remote_extension_id IS NOT NULL);
 
 
 --
@@ -653,11 +583,11 @@ ALTER TABLE ONLY public.agent_capability_grants
 
 
 --
--- Name: agent_capability_grants agent_capability_grants_connection_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_capability_grants agent_capability_grants_connection_context_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.agent_capability_grants
-    ADD CONSTRAINT agent_capability_grants_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.external_connections(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT agent_capability_grants_connection_context_fk FOREIGN KEY (connection_id, user_context_id) REFERENCES public.external_connections(id, user_context_id) ON DELETE RESTRICT;
 
 
 --
@@ -669,59 +599,19 @@ ALTER TABLE ONLY public.agent_capability_grants
 
 
 --
--- Name: connected_app_pending_actions connected_app_pending_actions_extension_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connected_app_pending_actions
-    ADD CONSTRAINT connected_app_pending_actions_extension_id_fkey FOREIGN KEY (extension_id) REFERENCES public.remote_extensions(id) ON DELETE CASCADE;
-
-
---
--- Name: connected_app_pending_actions connected_app_pending_actions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connected_app_pending_actions
-    ADD CONSTRAINT connected_app_pending_actions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- Name: connection_authorization_sessions connection_authorization_sessions_integration_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connection_authorization_sessions
-    ADD CONSTRAINT connection_authorization_sessions_integration_id_fkey FOREIGN KEY (integration_id) REFERENCES public.integration_definitions(id) ON DELETE CASCADE;
-
-
---
--- Name: connection_authorization_sessions connection_authorization_sessions_user_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connection_authorization_sessions
-    ADD CONSTRAINT connection_authorization_sessions_user_context_id_fkey FOREIGN KEY (user_context_id) REFERENCES public.user_contexts(id) ON DELETE CASCADE;
-
-
---
--- Name: connections connections_context_owner_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connections
-    ADD CONSTRAINT connections_context_owner_fk FOREIGN KEY (user_context_id, user_id) REFERENCES public.user_contexts(id, user_id) ON DELETE RESTRICT;
-
-
---
--- Name: connections connections_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.connections
-    ADD CONSTRAINT connections_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
 -- Name: external_connections external_connections_integration_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.external_connections
     ADD CONSTRAINT external_connections_integration_id_fkey FOREIGN KEY (integration_id) REFERENCES public.integration_definitions(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: external_connections external_connections_remote_extension_context_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.external_connections
+    ADD CONSTRAINT external_connections_remote_extension_context_fk FOREIGN KEY (remote_extension_id, user_context_id) REFERENCES public.remote_extensions(id, user_context_id) ON DELETE RESTRICT;
 
 
 --
@@ -754,6 +644,22 @@ ALTER TABLE ONLY public.integration_declaration_versions
 
 ALTER TABLE ONLY public.integration_definitions
     ADD CONSTRAINT integration_definitions_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.platform_deployments(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: mcp_authorization_sessions mcp_authorization_sessions_extension_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mcp_authorization_sessions
+    ADD CONSTRAINT mcp_authorization_sessions_extension_id_fkey FOREIGN KEY (extension_id) REFERENCES public.remote_extensions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: mcp_authorization_sessions mcp_authorization_sessions_user_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.mcp_authorization_sessions
+    ADD CONSTRAINT mcp_authorization_sessions_user_context_id_fkey FOREIGN KEY (user_context_id) REFERENCES public.user_contexts(id) ON DELETE CASCADE;
 
 
 --

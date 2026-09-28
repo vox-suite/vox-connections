@@ -2,10 +2,7 @@ use serde_json::json;
 use uuid::Uuid;
 use vox_connections::{
     conformance::{ReferencePlatform, canonical_suite, run_suite},
-    connected_apps::{
-        ConnectedAppsOptions, ConnectedAppsService,
-        policy::{ToolPolicy, classify},
-    },
+    connected_apps::{ConnectedAppsOptions, ConnectedAppsService},
     identity::{DeploymentId, RequestContext, RequestScope, RequestSubject, UserContextId, UserId},
     providers::expedia::integration_declaration,
     remote_extensions::{
@@ -62,10 +59,6 @@ fn connector_boundary_redacts_and_requires_declared_guarantees() {
     assert!(
         ProtocolRouter::validate_guarantees(&["cancellation_supported".into()], &json!({}))
             .is_err()
-    );
-    assert_eq!(
-        classify(&json!({"name": "purchase_item"})),
-        ToolPolicy::Confirm
     );
 }
 

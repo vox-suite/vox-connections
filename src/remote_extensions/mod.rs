@@ -353,6 +353,13 @@ impl RemoteExtensionService {
     }
 
     fn validate_endpoint_url(&self, url_str: &str) -> Result<String, RemoteExtensionError> {
+        Self::validate_endpoint_url_with_mode(url_str, self.allow_local_endpoints)
+    }
+
+    fn validate_endpoint_url_with_mode(
+        url_str: &str,
+        allow_local_endpoints: bool,
+    ) -> Result<String, RemoteExtensionError> {
         let trimmed = url_str.trim();
         let parsed = Url::parse(trimmed).map_err(|_| RemoteExtensionError::Invalid)?;
         if !parsed.username().is_empty()
@@ -376,11 +383,11 @@ impl RemoteExtensionService {
             Host::Ipv6(ip) => !public_ip(IpAddr::V6(ip)),
             _ => false,
         };
-        if (local_name || local_ip) && !self.allow_local_endpoints {
+        if (local_name || local_ip) && !allow_local_endpoints {
             return Err(RemoteExtensionError::Invalid);
         }
         if parsed.scheme() == "https"
-            || (self.allow_local_endpoints && parsed.scheme() == "http" && (local_name || local_ip))
+            || (allow_local_endpoints && parsed.scheme() == "http" && (local_name || local_ip))
         {
             Ok(trimmed.to_string())
         } else {
@@ -396,20 +403,64 @@ impl RemoteExtensionService {
         Ok(trimmed.to_string())
     }
 
-    pub async fn install(
-        &self,
-        context: &impl RequestScope,
-        request: InstallExtensionRequest,
-    ) -> Result<RemoteExtension, RemoteExtensionError> {
-        let external_key = Self::validate_key(&request.external_key)?;
-        let display_name = Self::validate_key(&request.display_name)?;
-        let endpoint_url = self.validate_endpoint_url(&request.endpoint_url)?;
+    fn validate_capabilities(
+        capabilities: &[ExtensionCapability],
+    ) -> Result<(), RemoteExtensionError> {
+        if capabilities.len() > 64 {
+            return Err(RemoteExtensionError::Invalid);
+        }
+        let mut keys = std::collections::HashSet::new();
+        for capability in capabilities {
+            let key = Self::validate_key(&capability.external_key)?;
+            if key != capability.external_key
+                || !keys.insert(key)
+                || Self::validate_key(&capability.display_name).is_err()
+                || capability.consequential != capability.effect.is_consequential()
+                || capability.data_recipients.is_empty()
+                || capability
+                    .data_recipients
+                    .iter()
+                    .any(|item| Self::validate_key(item).is_err())
+                || capability
+                    .access_needs
+                    .iter()
+                    .any(|item| Self::validate_key(item).is_err())
+                || (!capability.optional_guarantees.is_null()
+                    && !capability.optional_guarantees.is_object())
+            {
+                return Err(RemoteExtensionError::Invalid);
+            }
+        }
+        Ok(())
+    }
 
+    /// The same pure manifest check used by installation and the author CLI.
+    /// This validates declarations, not operator trust or provider behavior.
+    pub fn validate_install_request(
+        request: &InstallExtensionRequest,
+        allow_local_endpoints: bool,
+    ) -> Result<(), RemoteExtensionError> {
+        Self::validate_key(&request.external_key)?;
+        Self::validate_key(&request.display_name)?;
+        Self::validate_endpoint_url_with_mode(&request.endpoint_url, allow_local_endpoints)?;
+        Self::validate_capabilities(&request.capabilities)?;
         if request.operator.operator_id.trim().is_empty()
             || request.operator.operator_name.trim().is_empty()
         {
             return Err(RemoteExtensionError::Invalid);
         }
+        Ok(())
+    }
+
+    pub async fn install(
+        &self,
+        context: &impl RequestScope,
+        request: InstallExtensionRequest,
+    ) -> Result<RemoteExtension, RemoteExtensionError> {
+        Self::validate_install_request(&request, self.allow_local_endpoints)?;
+        let external_key = Self::validate_key(&request.external_key)?;
+        let display_name = Self::validate_key(&request.display_name)?;
+        let endpoint_url = self.validate_endpoint_url(&request.endpoint_url)?;
 
         let mut tx = self.db.begin().await?;
 
@@ -677,6 +728,7 @@ impl RemoteExtensionService {
 
         let row = sqlx::query(
             "SELECT e.current_version, e.endpoint_url, e.operator_id, e.operator_name, \
+                    e.support_email, e.terms_url, \
                     e.operator_enabled, e.lifecycle_state, v.capabilities \
              FROM remote_extensions e \
              JOIN remote_extension_versions v ON v.extension_id = e.id AND v.version = e.current_version \
@@ -692,6 +744,12 @@ impl RemoteExtensionService {
         let old_endpoint: String = row.get("endpoint_url");
         let old_operator_id: String = row.get("operator_id");
         let old_operator_name: String = row.get("operator_name");
+        let old_operator = ExtensionOperator {
+            operator_id: old_operator_id,
+            operator_name: old_operator_name,
+            support_email: row.get("support_email"),
+            terms_url: row.get("terms_url"),
+        };
         let old_capabilities: Vec<ExtensionCapability> =
             serde_json::from_value(row.get("capabilities")).unwrap_or_default();
 
@@ -700,18 +758,13 @@ impl RemoteExtensionService {
             None => old_endpoint,
         };
 
-        let new_operator = request.operator.unwrap_or(ExtensionOperator {
-            operator_id: old_operator_id.clone(),
-            operator_name: old_operator_name.clone(),
-            support_email: None,
-            terms_url: None,
-        });
+        let new_operator = request.operator.unwrap_or_else(|| old_operator.clone());
 
         let new_capabilities = request.capabilities.unwrap_or(old_capabilities.clone());
+        Self::validate_capabilities(&new_capabilities)?;
 
         // Check if operator changed
-        let operator_changed = new_operator.operator_id != old_operator_id
-            || new_operator.operator_name != old_operator_name;
+        let operator_changed = new_operator != old_operator;
 
         // Check if data recipients expanded
         let old_recipients: std::collections::HashSet<String> = old_capabilities
@@ -761,7 +814,8 @@ impl RemoteExtensionService {
         sqlx::query(
             "UPDATE remote_extensions \
              SET current_version = $2, endpoint_url = $3, operator_id = $4, operator_name = $5, \
-                 conformance_status = 'pending', consent_status = $6, lifecycle_state = $7, updated_at = now() \
+                 support_email = $6, terms_url = $7, \
+                 conformance_status = 'pending', consent_status = $8, lifecycle_state = $9, updated_at = now() \
              WHERE id = $1",
         )
         .bind(extension_id)
@@ -769,10 +823,25 @@ impl RemoteExtensionService {
         .bind(&new_endpoint)
         .bind(&new_operator.operator_id)
         .bind(&new_operator.operator_name)
+        .bind(&new_operator.support_email)
+        .bind(&new_operator.terms_url)
         .bind(consent_status)
         .bind(lifecycle_state)
         .execute(&mut *tx)
         .await?;
+
+        // A previous OAuth token belongs to the old declaration. In particular,
+        // never send it to a newly configured endpoint. A new version must go
+        // through authorization and tool discovery again.
+        sqlx::query("DELETE FROM mcp_authorization_sessions WHERE extension_id = $1")
+            .bind(extension_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM remote_extension_credentials WHERE extension_id = $1")
+            .bind(extension_id)
+            .execute(&mut *tx)
+            .await?;
+        revoke_extension_authority(&mut tx, extension_id).await?;
 
         tx.commit().await?;
         self.get(context, extension_id).await
@@ -883,6 +952,7 @@ impl RemoteExtensionService {
         .bind(extension_id)
         .execute(&mut *tx)
         .await?;
+        revoke_extension_authority(&mut tx, extension_id).await?;
 
         tx.commit().await?;
         self.get(context, extension_id).await
@@ -915,6 +985,18 @@ impl RemoteExtensionService {
         .bind(extension_id)
         .execute(&mut *tx)
         .await?;
+
+        // Removal must revoke platform custody even when an independent host
+        // calls this service directly instead of Core's HTTP wrapper.
+        sqlx::query("DELETE FROM mcp_authorization_sessions WHERE extension_id = $1")
+            .bind(extension_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM remote_extension_credentials WHERE extension_id = $1")
+            .bind(extension_id)
+            .execute(&mut *tx)
+            .await?;
+        revoke_extension_authority(&mut tx, extension_id).await?;
 
         tx.commit().await?;
         self.get(context, extension_id).await
@@ -1061,4 +1143,71 @@ fn map_extension(row: sqlx::postgres::PgRow) -> Result<RemoteExtension, RemoteEx
         updated_at: row.get("updated_at"),
         capabilities,
     })
+}
+
+async fn revoke_extension_authority(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    extension_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE external_connections SET authorization_state='revoked', \
+         authorized_capabilities='{}'::text[], expires_at=NULL, failure_code=NULL, \
+         revoked_at=COALESCE(revoked_at,now()), updated_at=now() \
+         WHERE remote_extension_id=$1",
+    )
+    .bind(extension_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE agent_capability_grants SET state='revoked', \
+         revoked_at=COALESCE(revoked_at,now()), updated_at=now() \
+         WHERE connection_id IN (SELECT id FROM external_connections WHERE remote_extension_id=$1) \
+         AND state='enabled'",
+    )
+    .bind(extension_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+
+    fn read_capability() -> ExtensionCapability {
+        ExtensionCapability {
+            external_key: "weather.read".into(),
+            display_name: "Read weather".into(),
+            effect: ExtensionEffect::Read,
+            consequential: false,
+            data_recipients: vec!["Weather Operator".into()],
+            access_needs: vec!["city".into()],
+            optional_guarantees: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn manifest_rejects_duplicate_or_misclassified_capabilities() {
+        let valid = read_capability();
+        assert!(
+            RemoteExtensionService::validate_capabilities(std::slice::from_ref(&valid)).is_ok()
+        );
+        assert!(
+            RemoteExtensionService::validate_capabilities(&[valid.clone(), valid.clone()]).is_err()
+        );
+        let mut write = valid;
+        write.effect = ExtensionEffect::Write;
+        assert!(RemoteExtensionService::validate_capabilities(&[write]).is_err());
+    }
+
+    #[test]
+    fn author_check_uses_the_install_boundary() {
+        let mut manifest: InstallExtensionRequest =
+            serde_json::from_str(include_str!("../../examples/mcp/read-only-manifest.json"))
+                .expect("sample manifest");
+        assert!(RemoteExtensionService::validate_install_request(&manifest, false).is_ok());
+        manifest.endpoint_url = "http://127.0.0.1:8765/mcp".into();
+        assert!(RemoteExtensionService::validate_install_request(&manifest, false).is_err());
+        assert!(RemoteExtensionService::validate_install_request(&manifest, true).is_ok());
+    }
 }

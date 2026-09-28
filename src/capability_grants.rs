@@ -60,7 +60,7 @@ impl CapabilityGrantService {
         .ok_or(CapabilityGrantError::Unavailable)?;
         let agent_id: Uuid = row.try_get("id")?;
         let declared_for_agent = sqlx::query_scalar::<_, bool>(
-            "SELECT $3 = ANY(requested_capability_categories) FROM agent_definitions \
+            "SELECT ($3 = ANY(requested_capability_categories) OR '*' = ANY(requested_capability_categories)) FROM agent_definitions \
              WHERE id = $1 AND deployment_id = $2",
         )
         .bind(agent_id)
@@ -76,15 +76,21 @@ impl CapabilityGrantService {
         // grant, or finish first so this check sees the disabled version.
         let connection_is_authorized = sqlx::query_scalar::<_, Uuid>(
             "SELECT x.id FROM external_connections x \
-             JOIN integration_definitions i ON i.id = x.integration_id \
-             JOIN integration_capability_declarations c ON c.integration_id = i.id \
              WHERE x.id = $1 AND x.user_context_id = $2 \
              AND x.authorization_state = 'authorized' \
              AND (x.expires_at IS NULL OR x.expires_at > now()) \
-             AND i.deployment_id = $3 AND i.state = 'enabled' \
-             AND concat(i.external_key, '.', c.external_key) = $4 \
              AND $4 = ANY(x.authorized_capabilities) \
-             FOR SHARE OF x,i",
+             AND (EXISTS (SELECT 1 FROM integration_definitions i \
+                  JOIN integration_capability_declarations c ON c.integration_id=i.id \
+                  WHERE i.id=x.integration_id AND i.deployment_id=$3 AND i.state='enabled' \
+                  AND concat(i.external_key,'.',c.external_key)=$4) \
+               OR EXISTS (SELECT 1 FROM remote_extensions e \
+                  JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version \
+                  WHERE e.id=x.remote_extension_id AND e.user_context_id=x.user_context_id \
+                  AND e.lifecycle_state='active' AND e.consent_status='consented' \
+                  AND EXISTS (SELECT 1 FROM jsonb_array_elements(v.capabilities) cap \
+                              WHERE cap->>'external_key'=$4))) \
+             FOR SHARE OF x",
         )
         .bind(request.connection_id)
         .bind(context.id.0)
@@ -130,15 +136,23 @@ impl CapabilityGrantService {
              JOIN agent_definitions a ON a.id = g.agent_definition_id \
              JOIN deployment_agent_selections s ON s.agent_definition_id = a.id \
              JOIN external_connections x ON x.id = g.connection_id \
-             JOIN integration_definitions i ON i.id = x.integration_id \
-             JOIN integration_capability_declarations c ON c.integration_id = i.id \
              WHERE g.user_context_id = $1 AND a.deployment_id = $2 AND a.external_key = $3 \
              AND a.state = 'enabled' AND g.state = 'enabled' \
              AND x.user_context_id = $1 AND x.authorization_state = 'authorized' \
-             AND (x.expires_at IS NULL OR x.expires_at > now()) AND i.state = 'enabled' \
-             AND concat(i.external_key, '.', c.external_key) = g.capability_external_key \
-             AND g.capability_external_key = ANY(a.requested_capability_categories) \
+             AND (x.expires_at IS NULL OR x.expires_at > now()) \
+             AND (g.capability_external_key = ANY(a.requested_capability_categories) \
+                  OR '*' = ANY(a.requested_capability_categories)) \
              AND g.capability_external_key = ANY(x.authorized_capabilities) \
+             AND (EXISTS (SELECT 1 FROM integration_definitions i \
+                  JOIN integration_capability_declarations c ON c.integration_id=i.id \
+                  WHERE i.id=x.integration_id AND i.deployment_id=$2 AND i.state='enabled' \
+                  AND concat(i.external_key,'.',c.external_key)=g.capability_external_key) \
+               OR EXISTS (SELECT 1 FROM remote_extensions e \
+                  JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version \
+                  WHERE e.id=x.remote_extension_id AND e.user_context_id=x.user_context_id \
+                  AND e.lifecycle_state='active' AND e.consent_status='consented' \
+                  AND EXISTS (SELECT 1 FROM jsonb_array_elements(v.capabilities) cap \
+                              WHERE cap->>'external_key'=g.capability_external_key))) \
              ORDER BY g.capability_external_key",
         )
         .bind(context.id.0)
