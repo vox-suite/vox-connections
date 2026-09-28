@@ -7,6 +7,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CredentialCustody {
+    None,
     PlatformHeld,
     ExternalOperator,
 }
@@ -198,6 +199,7 @@ fn connection_from_row(
 
 fn parse_custody(value: &str) -> Result<CredentialCustody, ConnectionError> {
     match value {
+        "none" => Ok(CredentialCustody::None),
         "platform_held" => Ok(CredentialCustody::PlatformHeld),
         "external_operator" => Ok(CredentialCustody::ExternalOperator),
         _ => Err(ConnectionError::Invalid),

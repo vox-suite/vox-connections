@@ -764,3 +764,18 @@ impl<A: PlatformAdapter> PlatformAdapter for JsonBoundary<A> {
             .result
     }
 }
+
+/// Reviewed schemas resolve only document-local references.
+pub fn local_schema(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => map.iter().all(|(key, value)| {
+            if key == "$ref" || key == "$dynamicRef" {
+                value.as_str().is_some_and(|v| v.starts_with('#'))
+            } else {
+                local_schema(value)
+            }
+        }),
+        serde_json::Value::Array(values) => values.iter().all(local_schema),
+        _ => true,
+    }
+}

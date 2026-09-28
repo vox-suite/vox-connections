@@ -18,6 +18,82 @@ pub struct PublishPackage {
     pub version: i32,
     pub manifest: InstallExtensionRequest,
     pub review: Value,
+    pub metadata: PackageMetadata,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackageMetadata {
+    pub schema_version: u32,
+    pub protocol_version: String,
+    pub auth_mode: PackageAuthMode,
+    pub credential_custody: String,
+    pub skills: Vec<PinnedSkill>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageAuthMode {
+    Oauth,
+    None,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PinnedSkill {
+    pub external_key: String,
+    pub version: i32,
+    pub digest: String,
+}
+
+impl PackageMetadata {
+    pub fn oauth() -> Self {
+        Self {
+            schema_version: 1,
+            protocol_version: "2025-11-25".into(),
+            auth_mode: PackageAuthMode::Oauth,
+            credential_custody: "platform_held".into(),
+            skills: vec![],
+        }
+    }
+    pub fn validate(&self) -> Result<(), PackageError> {
+        if self.schema_version != 1
+            || !matches!(self.protocol_version.as_str(), "2025-11-25" | "2026-07-28")
+            || !matches!(
+                self.credential_custody.as_str(),
+                "platform_held" | "external_operator" | "none"
+            )
+            || (self.auth_mode == PackageAuthMode::None && self.credential_custody != "none")
+            || (self.auth_mode == PackageAuthMode::Oauth
+                && self.credential_custody != "platform_held")
+            || self.skills.len() > 16
+        {
+            return Err(PackageError::Invalid);
+        }
+        let mut keys = std::collections::HashSet::new();
+        for skill in &self.skills {
+            if skill.version < 1
+                || skill.external_key.is_empty()
+                || skill.external_key.len() > 64
+                || !skill
+                    .external_key
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                || skill.external_key.starts_with('-')
+                || skill.external_key.ends_with('-')
+                || skill.external_key.contains("--")
+                || skill.digest.len() != 64
+                || !skill
+                    .digest
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                || !keys.insert(&skill.external_key)
+            {
+                return Err(PackageError::Invalid);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -25,6 +101,7 @@ pub struct ConnectorPackage {
     pub version: i32,
     pub digest: String,
     pub manifest: InstallExtensionRequest,
+    pub metadata: PackageMetadata,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +132,7 @@ impl PackageRegistry {
     /// changing a published version is prohibited, even after withdrawal.
     pub async fn publish(&self, request: PublishPackage) -> Result<ConnectorPackage, PackageError> {
         RemoteExtensionService::validate_install_request(&request.manifest, false)?;
+        request.metadata.validate()?;
         if request.version < 1
             || request.manifest.external_key != request.manifest.external_key.trim()
             || request.manifest.display_name != request.manifest.display_name.trim()
@@ -65,7 +143,7 @@ impl PackageRegistry {
         }
         let manifest =
             serde_json::to_value(&request.manifest).map_err(|_| PackageError::Invalid)?;
-        let bytes = serde_json::to_vec(&request.manifest).map_err(|_| PackageError::Invalid)?;
+        let bytes = package_bytes(&request.manifest, &request.metadata)?;
         if bytes.len() > 256 * 1024
             || serde_json::to_vec(&request.review)
                 .map_err(|_| PackageError::Invalid)?
@@ -76,9 +154,9 @@ impl PackageRegistry {
         }
         let digest = hex::encode(Sha256::digest(&bytes));
         let mut tx = self.db.begin().await?;
-        sqlx::query("INSERT INTO connector_packages (deployment_id,external_key,version,digest,manifest,review) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING")
+        sqlx::query("INSERT INTO connector_packages (deployment_id,external_key,version,digest,manifest,review,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING")
             .bind(request.deployment_id).bind(&request.manifest.external_key).bind(request.version)
-            .bind(&digest).bind(&manifest).bind(&request.review).execute(&mut *tx).await?;
+            .bind(&digest).bind(&manifest).bind(&request.review).bind(serde_json::to_value(&request.metadata).map_err(|_| PackageError::Invalid)?).execute(&mut *tx).await?;
         let stored: String = sqlx::query_scalar("SELECT digest FROM connector_packages WHERE deployment_id=$1 AND external_key=$2 AND version=$3")
             .bind(request.deployment_id).bind(&request.manifest.external_key).bind(request.version)
             .fetch_one(&mut *tx).await?;
@@ -90,6 +168,7 @@ impl PackageRegistry {
             version: request.version,
             digest,
             manifest: request.manifest,
+            metadata: request.metadata,
         })
     }
 
@@ -98,7 +177,7 @@ impl PackageRegistry {
         &self,
         context: &impl RequestScope,
     ) -> Result<Vec<ConnectorPackage>, PackageError> {
-        let rows = sqlx::query("SELECT DISTINCT ON (external_key) version,digest,manifest FROM connector_packages WHERE deployment_id=$1 AND enabled ORDER BY external_key,version DESC LIMIT 100")
+        let rows = sqlx::query("SELECT DISTINCT ON (external_key) version,digest,manifest,metadata FROM connector_packages WHERE deployment_id=$1 AND enabled ORDER BY external_key,version DESC LIMIT 100")
             .bind(context.request_context().subject.deployment_id.0).fetch_all(&self.db).await?;
         rows.into_iter()
             .map(|row| {
@@ -106,6 +185,8 @@ impl PackageRegistry {
                     version: row.get("version"),
                     digest: row.get("digest"),
                     manifest: serde_json::from_value(row.get("manifest"))
+                        .map_err(|_| PackageError::Invalid)?,
+                    metadata: serde_json::from_value(row.get("metadata"))
                         .map_err(|_| PackageError::Invalid)?,
                 })
             })
@@ -137,7 +218,7 @@ impl PackageRegistry {
             .bind(format!("package-install:{}", scope.id.0))
             .execute(&mut *tx)
             .await?;
-        let row = sqlx::query("SELECT manifest,digest,review FROM connector_packages WHERE deployment_id=$1 AND external_key=$2 AND version=$3 AND enabled FOR SHARE")
+        let row = sqlx::query("SELECT manifest,digest,review,metadata FROM connector_packages WHERE deployment_id=$1 AND external_key=$2 AND version=$3 AND enabled FOR SHARE")
             .bind(scope.subject.deployment_id.0).bind(key).bind(version).fetch_optional(&mut *tx).await?
             .ok_or(PackageError::Unavailable)?;
         if row.get::<String, _>("digest") != digest {
@@ -145,6 +226,9 @@ impl PackageRegistry {
         }
         let manifest: InstallExtensionRequest =
             serde_json::from_value(row.get("manifest")).map_err(|_| PackageError::Invalid)?;
+        let metadata: PackageMetadata =
+            serde_json::from_value(row.get("metadata")).map_err(|_| PackageError::Invalid)?;
+        metadata.validate()?;
         let extensions = RemoteExtensionService::new(self.db.clone());
         let existing_id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM remote_extensions WHERE user_context_id=$1 AND external_key=$2 AND lifecycle_state <> 'removed' FOR UPDATE")
             .bind(scope.id.0).bind(key).fetch_optional(&mut *tx).await?;
@@ -163,6 +247,34 @@ impl PackageRegistry {
             || extension.capabilities != manifest.capabilities
         {
             return Err(PackageError::Conflict);
+        }
+        // A normal install cannot silently rebind an existing installation to
+        // changed auth, custody, protocol or bundled guidance. Updates have a
+        // separate explicit consent path and clear account authority.
+        let previous_metadata: Option<Value> = sqlx::query_scalar("SELECT p.metadata FROM connector_package_installations i JOIN connector_packages p USING(deployment_id,external_key,version) WHERE i.extension_id=$1")
+            .bind(extension.id).fetch_optional(&mut *tx).await?;
+        if previous_metadata.is_some_and(|previous| {
+            previous != serde_json::to_value(&metadata).unwrap_or(Value::Null)
+        }) {
+            return Err(PackageError::Conflict);
+        }
+        let mut ordered_skills = metadata.skills.iter().collect::<Vec<_>>();
+        ordered_skills.sort_by_key(|skill| &skill.external_key);
+        for pinned in ordered_skills {
+            let skill: Option<(Uuid, Option<String>)> = sqlx::query_as(
+                "SELECT s.id,v.digest FROM skill_packages s JOIN skill_package_versions v ON v.skill_id=s.id
+                 WHERE s.deployment_id=$1 AND s.external_key=$2 AND s.owner_user_context_id IS NULL AND s.state='active' AND v.version=$3 FOR SHARE OF s"
+            ).bind(scope.subject.deployment_id.0).bind(&pinned.external_key).bind(pinned.version).fetch_optional(&mut *tx).await?;
+            let (skill_id, stored_digest) = skill.ok_or(PackageError::Unavailable)?;
+            if stored_digest.as_deref() != Some(&pinned.digest) {
+                return Err(PackageError::Conflict);
+            }
+            let existing: Option<i32> = sqlx::query_scalar("SELECT installed_version FROM skill_installations WHERE user_context_id=$1 AND skill_id=$2 FOR UPDATE").bind(scope.id.0).bind(skill_id).fetch_optional(&mut *tx).await?;
+            if existing.is_some_and(|v| v != pinned.version) {
+                return Err(PackageError::Conflict);
+            }
+            sqlx::query("INSERT INTO skill_installations (user_context_id,skill_id,installed_version,independently_installed) VALUES ($1,$2,$3,false) ON CONFLICT DO NOTHING").bind(scope.id.0).bind(skill_id).bind(pinned.version).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO connector_skill_installations(extension_id,skill_id,user_context_id,version) VALUES ($1,$2,$3,$4) ON CONFLICT(extension_id,skill_id) DO UPDATE SET version=EXCLUDED.version").bind(extension.id).bind(skill_id).bind(scope.id.0).bind(pinned.version).execute(&mut *tx).await?;
         }
         // Binding and extension state commit together using one pool connection.
         sqlx::query("INSERT INTO connector_package_installations(extension_id,deployment_id,external_key,version) VALUES ($1,$2,$3,$4) ON CONFLICT (extension_id) DO UPDATE SET version=EXCLUDED.version,installed_at=now()")
@@ -230,6 +342,10 @@ impl PackageRegistry {
             .execute(&mut *tx)
             .await?;
         crate::remote_extensions::revoke_extensions_authority(&mut tx, &ids).await?;
+        let ids: Vec<Uuid> = sqlx::query_scalar("SELECT extension_id FROM connector_package_installations WHERE deployment_id=$1 AND external_key=$2 AND version=$3").bind(deployment).bind(key).bind(version).fetch_all(&mut *tx).await?;
+        for id in ids {
+            detach_package_skills(&mut tx, id).await?;
+        }
         tx.commit().await?;
         Ok(())
     }
@@ -259,4 +375,28 @@ pub(crate) async fn installed_package_available<
              'operator_id',e.operator_id,'operator_name',e.operator_name,\
              'support_email',e.support_email,'terms_url',e.terms_url))))",
     ).bind(extension_id).fetch_one(executor).await
+}
+
+/// Canonical bytes used by author tooling and immutable publication.
+pub fn package_bytes(
+    manifest: &InstallExtensionRequest,
+    metadata: &PackageMetadata,
+) -> Result<Vec<u8>, PackageError> {
+    serde_json::to_vec(&serde_json::json!({"manifest":manifest,"metadata":metadata}))
+        .map_err(|_| PackageError::Invalid)
+}
+
+pub(crate) async fn detach_package_skills(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    extension_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    // Serialize shared dependency cleanup before any association is removed.
+    // All package operations lock installations in UUID order.
+    sqlx::query("SELECT i.skill_id FROM skill_installations i JOIN connector_skill_installations b ON b.user_context_id=i.user_context_id AND b.skill_id=i.skill_id WHERE b.extension_id=$1 ORDER BY i.user_context_id,i.skill_id FOR UPDATE OF i")
+        .bind(extension_id).fetch_all(&mut **tx).await?;
+    let rows: Vec<(Uuid,Uuid)> = sqlx::query_as("DELETE FROM connector_skill_installations WHERE extension_id=$1 RETURNING user_context_id,skill_id").bind(extension_id).fetch_all(&mut **tx).await?;
+    for (context, skill) in rows {
+        sqlx::query("UPDATE skill_installations i SET enabled=false,updated_at=now() WHERE i.user_context_id=$1 AND i.skill_id=$2 AND NOT i.independently_installed AND NOT EXISTS (SELECT 1 FROM connector_skill_installations b WHERE b.user_context_id=i.user_context_id AND b.skill_id=i.skill_id)").bind(context).bind(skill).execute(&mut **tx).await?;
+    }
+    Ok(())
 }

@@ -115,6 +115,7 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         serde_json::from_str(include_str!("../examples/mcp/read-only-manifest.json"))
             .expect("package manifest");
     let package_request = vox_connections::packages::PublishPackage {
+        metadata: vox_connections::packages::PackageMetadata::oauth(),
         deployment_id,
         version: 1,
         manifest: manifest.clone(),
@@ -195,6 +196,79 @@ async fn independently_registered_host_can_install_skill_and_extension() {
             .expect("no implicit grants")
             .is_empty()
     );
+    // Two packages sharing one bundled skill can be withdrawn concurrently.
+    // The final association removal must disable the non-independent skill.
+    let bundled_request = PublishSkillRequest {
+        external_key: "shared-bundle".into(),
+        title: "Shared bundle".into(),
+        summary: "Shared guidance".into(),
+        instructions: "Summarize supplied facts.".into(),
+        requested_capabilities: vec![],
+        resources: json!({}),
+    };
+    let bundled_id = skills
+        .publish_curated(&deployment_key, bundled_request.clone())
+        .await
+        .expect("publish bundled skill");
+    let bundled_digest = vox_connections::skills::content_digest(&bundled_request).unwrap();
+    let mut bundle_packages = Vec::new();
+    for n in 1..=2 {
+        let mut bundled_manifest = manifest.clone();
+        bundled_manifest.external_key = format!("bundle-app-{n}");
+        let mut metadata = vox_connections::packages::PackageMetadata::oauth();
+        metadata
+            .skills
+            .push(vox_connections::packages::PinnedSkill {
+                external_key: "shared-bundle".into(),
+                version: 1,
+                digest: bundled_digest.clone(),
+            });
+        let package = packages
+            .publish(vox_connections::packages::PublishPackage {
+                deployment_id,
+                version: 1,
+                manifest: bundled_manifest.clone(),
+                metadata,
+                review: json!({"reviewer":"test-operator"}),
+            })
+            .await
+            .expect("publish bundle package");
+        let installed = packages
+            .install(&context, &bundled_manifest.external_key, 1, &package.digest)
+            .await
+            .expect("install bundle package");
+        bundle_packages.push((bundled_manifest.external_key, installed.id));
+    }
+    let enabled: bool = sqlx::query_scalar(
+        "SELECT enabled FROM skill_installations WHERE user_context_id=$1 AND skill_id=$2",
+    )
+    .bind(context_id)
+    .bind(bundled_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(enabled);
+    let withdrawal = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(
+            packages.withdraw(deployment_id, &bundle_packages[0].0, 1),
+            packages.withdraw(deployment_id, &bundle_packages[1].0, 1)
+        )
+    })
+    .await
+    .expect("concurrent withdrawal completes");
+    withdrawal.0.expect("first withdrawal");
+    withdrawal.1.expect("second withdrawal");
+    let enabled: bool = sqlx::query_scalar(
+        "SELECT enabled FROM skill_installations WHERE user_context_id=$1 AND skill_id=$2",
+    )
+    .bind(context_id)
+    .bind(bundled_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!enabled, "orphaned bundle must be disabled");
+    let associations:i64=sqlx::query_scalar("SELECT count(*) FROM connector_skill_installations WHERE skill_id=$1 AND user_context_id=$2").bind(bundled_id).bind(context_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(associations, 0);
     sqlx::query("INSERT INTO remote_extension_credentials (extension_id,issuer,token_endpoint,client_id,resource,access_token_ciphertext) VALUES ($1,'https://example.com','https://example.com/token','client','https://example.com/mcp',$2)")
         .bind(first.id).bind(vec![1_u8,2,3]).execute(&pool).await.expect("package credential");
     let package_connection: Uuid = sqlx::query_scalar("INSERT INTO external_connections (user_context_id,remote_extension_id,external_account_hash,credential_custody,authorization_state,authorized_capabilities) VALUES ($1,$2,$3,'platform_held','authorized',ARRAY['echo.read']) RETURNING id")
@@ -298,6 +372,7 @@ async fn independently_registered_host_can_install_skill_and_extension() {
     }
     let write_package = packages
         .publish(vox_connections::packages::PublishPackage {
+            metadata: vox_connections::packages::PackageMetadata::oauth(),
             deployment_id,
             version: 1,
             manifest: write_manifest.clone(),
@@ -343,6 +418,8 @@ async fn independently_registered_host_can_install_skill_and_extension() {
                     terms_url: None,
                 },
                 capabilities: vec![ExtensionCapability {
+                    input_schema: json!({"type":"object"}),
+                    supported_regions: vec![],
                     external_key: "weather.read".into(),
                     display_name: "Read weather".into(),
                     effect: ExtensionEffect::Read,

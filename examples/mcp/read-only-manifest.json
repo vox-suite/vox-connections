@@ -15,9 +15,17 @@
       "display_name": "Read echoed text",
       "effect": "read",
       "consequential": false,
-      "data_recipients": ["Example Inc."],
-      "access_needs": ["text"],
-      "optional_guarantees": {}
+      "data_recipients": [
+        "Example Inc."
+      ],
+      "access_needs": [
+        "text"
+      ],
+      "optional_guarantees": {},
+      "input_schema": {
+        "type": "object"
+      },
+      "supported_regions": []
     }
   ]
 }

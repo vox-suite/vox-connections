@@ -10,7 +10,13 @@ use uuid::Uuid;
 use super::ConnectedAppError;
 use crate::remote_extensions::adapters::transport::client_for_endpoint;
 
-const LEGACY_PROTOCOL_VERSION: &str = "2025-06-18";
+pub struct ToolCall<'a> {
+    pub name: &'a str,
+    pub expected_protocol: Option<&'a str>,
+    pub arguments: Value,
+}
+
+const HANDSHAKE_PROTOCOL_VERSION: &str = "2025-11-25";
 const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TOOL_PAGES: usize = 10;
@@ -56,7 +62,12 @@ impl McpDiscoveryClient {
         let http = self.client(endpoint, allow_local).await?;
         let mut session = McpSession::open(http, endpoint, access_token, timeout).await?;
         let tools = session.list_tools().await?;
-        Ok((session.server_info.clone(), tools))
+        let mut info = session.server_info.clone();
+        if !info.is_object() {
+            info = json!({})
+        }
+        info["vox_protocol_version"] = json!(session.protocol_version);
+        Ok((info, tools))
     }
 
     /// Execute one already-authorized tool through a fresh authenticated MCP
@@ -65,24 +76,29 @@ impl McpDiscoveryClient {
         &self,
         endpoint: &str,
         access_token: &str,
-        tool_name: &str,
-        arguments: Value,
+        call: ToolCall<'_>,
         timeout: Duration,
         allow_local: bool,
     ) -> Result<Value, ConnectedAppError> {
         let http = self.client(endpoint, allow_local).await?;
         let mut session = McpSession::open(http, endpoint, access_token, timeout).await?;
+        if call
+            .expected_protocol
+            .is_some_and(|expected| expected != session.protocol_version)
+        {
+            return Err(ConnectedAppError::Invalid);
+        }
         session
             .request(
                 "tools/call",
-                json!({"name": tool_name, "arguments": arguments}),
+                json!({"name": call.name, "arguments": call.arguments}),
             )
             .await
     }
 }
 
 /// One authenticated Streamable HTTP peer. Modern requests are stateless;
-/// legacy requests retain the negotiated session identifier.
+/// handshake requests retain the negotiated session identifier.
 pub struct McpSession {
     http: reqwest::Client,
     endpoint: String,
@@ -106,7 +122,7 @@ impl McpSession {
             endpoint: endpoint.to_string(),
             access_token: access_token.to_string(),
             session_id: None,
-            protocol_version: LEGACY_PROTOCOL_VERSION.to_string(),
+            protocol_version: HANDSHAKE_PROTOCOL_VERSION.to_string(),
             modern: false,
             server_info: Value::Null,
             timeout,
@@ -121,7 +137,7 @@ impl McpSession {
             .request(
                 "initialize",
                 json!({
-                    "protocolVersion": LEGACY_PROTOCOL_VERSION,
+                    "protocolVersion": HANDSHAKE_PROTOCOL_VERSION,
                     "capabilities": {},
                     "clientInfo": {"name": "Vox", "version": env!("CARGO_PKG_VERSION")}
                 }),
@@ -134,6 +150,11 @@ impl McpSession {
                 other => other,
             })?;
         if let Some(version) = result.get("protocolVersion").and_then(Value::as_str) {
+            if version != HANDSHAKE_PROTOCOL_VERSION {
+                return Err(ConnectedAppError::Provider(
+                    "MCP protocol negotiation returned an unsupported version".into(),
+                ));
+            }
             session.protocol_version = version.to_string();
         }
         session.server_info = result.get("serverInfo").cloned().unwrap_or(Value::Null);
@@ -143,9 +164,8 @@ impl McpSession {
 
     async fn probe_modern(&self) -> Result<Option<Value>, ConnectedAppError> {
         let id = Uuid::new_v4().to_string();
-        let response = self.http.post(&self.endpoint)
+        let mut probe = self.http.post(&self.endpoint)
             .timeout(self.timeout)
-            .bearer_auth(&self.access_token)
             .header("content-type", "application/json")
             .header("accept", "application/json, text/event-stream")
             .header("mcp-protocol-version", MODERN_PROTOCOL_VERSION)
@@ -158,7 +178,11 @@ impl McpSession {
                     "io.modelcontextprotocol/clientCapabilities": {}
                 }}
             }))
-            .send().await.map_err(network)?;
+            ;
+        if !self.access_token.is_empty() {
+            probe = probe.bearer_auth(&self.access_token);
+        }
+        let response = probe.send().await.map_err(network)?;
         if response.status().as_u16() == 401 {
             return Err(ConnectedAppError::Unauthorized);
         }
@@ -239,6 +263,11 @@ impl McpSession {
                 break;
             }
         }
+        if cursor.is_some() {
+            return Err(ConnectedAppError::Provider(
+                "MCP tool inventory exceeds the page limit".into(),
+            ));
+        }
         Ok(tools)
     }
 
@@ -247,10 +276,12 @@ impl McpSession {
             .http
             .post(&self.endpoint)
             .timeout(self.timeout)
-            .bearer_auth(&self.access_token)
             .header("content-type", "application/json")
             .header("accept", "application/json, text/event-stream");
         // The version header is only defined after negotiation.
+        if !self.access_token.is_empty() {
+            builder = builder.bearer_auth(&self.access_token);
+        }
         if !initialize {
             builder = builder.header("mcp-protocol-version", &self.protocol_version);
         }
@@ -472,7 +503,7 @@ mod protocol_tests {
                     "server/discover" => json!({"jsonrpc":"2.0","id":id,
                         "error":{"code":-32601,"message":"method not found"}}),
                     "initialize" => json!({"jsonrpc":"2.0","id":id,"result":{
-                        "protocolVersion":LEGACY_PROTOCOL_VERSION,"serverInfo":{"name":"legacy"}}}),
+                        "protocolVersion":HANDSHAKE_PROTOCOL_VERSION,"serverInfo":{"name":"legacy"}}}),
                     "notifications/initialized" => json!({}),
                     "tools/list" => json!({"jsonrpc":"2.0","id":id,"result":{
                         "tools":[{"name":"echo.read"}]}}),
@@ -487,7 +518,7 @@ mod protocol_tests {
     }
 
     #[tokio::test]
-    async fn negotiates_modern_and_legacy_mcp_without_mixing_wire_eras() {
+    async fn negotiates_modern_and_handshake_mcp_without_mixing_wire_eras() {
         for modern in [true, false] {
             let (endpoint, server) = mock_server(modern);
             let (server_info, tools) = McpDiscoveryClient::default()
