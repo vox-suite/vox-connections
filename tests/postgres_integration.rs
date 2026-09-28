@@ -110,6 +110,224 @@ async fn independently_registered_host_can_install_skill_and_extension() {
     );
 
     let extensions = RemoteExtensionService::new(pool.clone());
+    let packages = vox_connections::packages::PackageRegistry::new(pool.clone());
+    let manifest: InstallExtensionRequest =
+        serde_json::from_str(include_str!("../examples/mcp/read-only-manifest.json"))
+            .expect("package manifest");
+    let package_request = vox_connections::packages::PublishPackage {
+        deployment_id,
+        version: 1,
+        manifest: manifest.clone(),
+        review: json!({"read_effects_verified":true,"evidence":{"reviewer":"test-operator"}}),
+    };
+    let package = packages
+        .publish(package_request.clone())
+        .await
+        .expect("publish package");
+    packages
+        .publish(package_request.clone())
+        .await
+        .expect("same immutable package is idempotent");
+    let mut changed = package_request;
+    changed.manifest.endpoint_url = "https://different.example/mcp".into();
+    assert!(matches!(
+        packages.publish(changed).await,
+        Err(vox_connections::packages::PackageError::Conflict)
+    ));
+    assert_eq!(packages.list(&context).await.expect("catalog").len(), 1);
+    assert!(matches!(
+        packages
+            .install(&context, &manifest.external_key, 1, &"0".repeat(64))
+            .await,
+        Err(vox_connections::packages::PackageError::Conflict)
+    ));
+    // A one-connection pool must work: install must never acquire another
+    // connection while holding its transaction or advisory lock.
+    let single_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("single connection pool");
+    let single_packages = vox_connections::packages::PackageRegistry::new(single_pool.clone());
+    let other_deployment = RequestContext {
+        subject: RequestSubject {
+            deployment_id: DeploymentId(Uuid::new_v4()),
+        },
+        ..context
+    };
+    assert!(
+        packages
+            .list(&other_deployment)
+            .await
+            .expect("other deployment catalog")
+            .is_empty()
+    );
+    assert!(matches!(
+        packages
+            .install(
+                &other_deployment,
+                &manifest.external_key,
+                1,
+                &package.digest
+            )
+            .await,
+        Err(vox_connections::packages::PackageError::Unavailable)
+    ));
+    let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(
+            single_packages.install(&context, &manifest.external_key, 1, &package.digest),
+            packages.install(&context, &manifest.external_key, 1, &package.digest)
+        )
+    })
+    .await
+    .expect("concurrent installs must complete without a lock cycle");
+    single_pool.close().await;
+    let first = first.expect("first click");
+    assert_eq!(first.id, second.expect("concurrent click").id);
+    assert_eq!(
+        first.lifecycle_state,
+        vox_connections::remote_extensions::LifecycleState::Active
+    );
+    assert!(
+        CapabilityGrantService::new(pool.clone())
+            .effective_for_agent(&context, "general")
+            .await
+            .expect("no implicit grants")
+            .is_empty()
+    );
+    sqlx::query("INSERT INTO remote_extension_credentials (extension_id,issuer,token_endpoint,client_id,resource,access_token_ciphertext) VALUES ($1,'https://example.com','https://example.com/token','client','https://example.com/mcp',$2)")
+        .bind(first.id).bind(vec![1_u8,2,3]).execute(&pool).await.expect("package credential");
+    let package_connection: Uuid = sqlx::query_scalar("INSERT INTO external_connections (user_context_id,remote_extension_id,external_account_hash,credential_custody,authorization_state,authorized_capabilities) VALUES ($1,$2,$3,'platform_held','authorized',ARRAY['echo.read']) RETURNING id")
+        .bind(context_id).bind(first.id).bind(vec![9_u8;32]).fetch_one(&pool).await.expect("package account");
+    packages
+        .withdraw(deployment_id, &manifest.external_key, 1)
+        .await
+        .expect("withdraw");
+    assert!(
+        packages
+            .list(&context)
+            .await
+            .expect("withdrawn catalog")
+            .is_empty()
+    );
+    assert!(matches!(
+        packages
+            .install(&context, &manifest.external_key, 1, &package.digest)
+            .await,
+        Err(vox_connections::packages::PackageError::Unavailable)
+    ));
+    assert_eq!(
+        extensions
+            .get(&context, first.id)
+            .await
+            .expect("withdrawn installation")
+            .lifecycle_state,
+        vox_connections::remote_extensions::LifecycleState::Disabled
+    );
+    let credentials: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM remote_extension_credentials WHERE extension_id=$1",
+    )
+    .bind(first.id)
+    .fetch_one(&pool)
+    .await
+    .expect("withdraw credential count");
+    assert_eq!(credentials, 0);
+    let state: String =
+        sqlx::query_scalar("SELECT authorization_state FROM external_connections WHERE id=$1")
+            .bind(package_connection)
+            .fetch_one(&pool)
+            .await
+            .expect("withdraw account state");
+    assert_eq!(state, "revoked");
+    assert!(
+        extensions
+            .set_operator_enabled(&context, first.id, true)
+            .await
+            .is_err(),
+        "operator reenablement must not revive a withdrawn package"
+    );
+    // Even an out-of-band lifecycle change cannot bypass the package's trust
+    // boundary at OAuth start/callback or the generic endpoint authorization seam.
+    sqlx::query(
+        "UPDATE remote_extensions SET lifecycle_state='active',operator_enabled=true WHERE id=$1",
+    )
+    .bind(first.id)
+    .execute(&pool)
+    .await
+    .expect("force stale active fixture");
+    assert!(
+        extensions
+            .authorize_call(&context, first.id, &manifest.capabilities[0].external_key)
+            .await
+            .is_err()
+    );
+    let package_apps = ConnectedAppsService::from_options(
+        pool.clone(),
+        ConnectedAppsOptions {
+            credential_key: Some("00".repeat(32)),
+            redirect_uris: vec!["https://host.example/callback".into()],
+            ..ConnectedAppsOptions::default()
+        },
+    );
+    assert!(matches!(
+        package_apps
+            .begin(&context, first.id, "https://host.example/callback")
+            .await,
+        Err(ConnectedAppError::Invalid)
+    ));
+    let withdrawn_state = format!("withdrawn-oauth-{suffix}");
+    sqlx::query("INSERT INTO mcp_authorization_sessions (extension_id,user_context_id,state_hash,code_verifier_ciphertext,issuer,token_endpoint,client_id,redirect_uri,resource,endpoint_url,extension_version,expires_at) VALUES ($1,$2,$3,$4,'https://example.com','https://example.com/token','client','https://host.example/callback',$5,$5,1,now() + interval '10 minutes')")
+        .bind(first.id).bind(context_id).bind(vox_connections::connected_apps::crypto::sha256_hex(&withdrawn_state))
+        .bind(vec![4_u8,5,6]).bind(&manifest.endpoint_url).execute(&pool).await.expect("stale withdrawn session");
+    assert!(matches!(
+        package_apps
+            .complete(&context, &withdrawn_state, "code")
+            .await,
+        Err(ConnectedAppError::Expired)
+    ));
+    packages
+        .withdraw(deployment_id, &manifest.external_key, 1)
+        .await
+        .expect("idempotent withdrawal clears stale state");
+
+    let mut write_manifest = manifest.clone();
+    write_manifest.external_key = "reviewed-write-fixture".into();
+    for capability in &mut write_manifest.capabilities {
+        capability.effect = ExtensionEffect::Write;
+        capability.consequential = true;
+    }
+    let write_package = packages
+        .publish(vox_connections::packages::PublishPackage {
+            deployment_id,
+            version: 1,
+            manifest: write_manifest.clone(),
+            // Even this read-attestation must never activate a consequential package.
+            review: json!({"read_effects_verified":true,"evidence":{"reviewer":"test-operator"}}),
+        })
+        .await
+        .expect("publish write package");
+    let write_extension = packages
+        .install(
+            &context,
+            &write_manifest.external_key,
+            1,
+            &write_package.digest,
+        )
+        .await
+        .expect("install pending write");
+    assert!(!write_extension.operator_enabled);
+    assert_eq!(
+        write_extension.conformance_status,
+        vox_connections::remote_extensions::ConformanceStatus::Pending
+    );
+    assert_eq!(
+        write_extension.lifecycle_state,
+        vox_connections::remote_extensions::LifecycleState::Installed
+    );
+    packages
+        .withdraw(deployment_id, &write_manifest.external_key, 1)
+        .await
+        .expect("withdraw write fixture");
     let installed = extensions
         .install(
             &context,
@@ -172,6 +390,17 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         .execute(&pool)
         .await
         .expect("pending OAuth fixture");
+    // Core deliberately creates a separate internal user for each host context;
+    // it never links people across hosts from matching account identifiers.
+    // Independent hosts may reuse a user ID, so also exercise that stricter case.
+    let other_user_id = if core_host_schema {
+        sqlx::query_scalar::<_, Uuid>("INSERT INTO users DEFAULT VALUES RETURNING id")
+            .fetch_one(&pool)
+            .await
+            .expect("other host user")
+    } else {
+        user_id
+    };
     let other_context_id = if core_host_schema {
         let app_id = sqlx::query_scalar::<_, Uuid>(
             "INSERT INTO host_apps (deployment_id, external_key) VALUES ($1, 'other-host') RETURNING id",
@@ -186,7 +415,7 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         .bind(deployment_id)
         .bind(app_id)
         .bind(format!("other-user-{suffix}"))
-        .bind(user_id)
+        .bind(other_user_id)
         .fetch_one(&pool)
         .await
         .expect("second context")
@@ -195,7 +424,7 @@ async fn independently_registered_host_can_install_skill_and_extension() {
             "INSERT INTO user_contexts (deployment_id, user_id) VALUES ($1,$2) RETURNING id",
         )
         .bind(deployment_id)
-        .bind(user_id)
+        .bind(other_user_id)
         .fetch_one(&pool)
         .await
         .expect("second context")
@@ -207,6 +436,7 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         .expect("activate fixture");
     let other_context = RequestContext {
         id: UserContextId(other_context_id),
+        user_id: UserId(other_user_id),
         ..context
     };
     let agent_id = if core_host_schema {
@@ -228,12 +458,15 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         .await
         .expect("agent")
     };
-    sqlx::query("INSERT INTO deployment_agent_selections (deployment_id,agent_definition_id) VALUES ($1,$2)")
-        .bind(deployment_id)
-        .bind(agent_id)
-        .execute(&pool)
-        .await
-        .expect("select agent");
+    if core_host_schema {
+        let model_id: Uuid = sqlx::query_scalar("INSERT INTO agent_model_configurations(agent_definition_id,version,model_adapter,model) VALUES ($1,1,'fixture','fixture-model') RETURNING id")
+            .bind(agent_id).fetch_one(&pool).await.expect("agent model configuration");
+        sqlx::query("INSERT INTO deployment_agent_selections (deployment_id,agent_definition_id,model_configuration_id) VALUES ($1,$2,$3)")
+            .bind(deployment_id).bind(agent_id).bind(model_id).execute(&pool).await.expect("select configured agent");
+    } else {
+        sqlx::query("INSERT INTO deployment_agent_selections (deployment_id,agent_definition_id) VALUES ($1,$2)")
+            .bind(deployment_id).bind(agent_id).execute(&pool).await.expect("select agent");
+    }
     let grants = CapabilityGrantService::new(pool.clone());
     grants
         .grant(

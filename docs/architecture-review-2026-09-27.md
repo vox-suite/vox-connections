@@ -2,7 +2,7 @@
 
 ## Verdict
 
-The package has useful foundations but is **not yet a production-ready, one-click connector platform**. The governed integration path models declarations, user-owned connections, grants, conformance and mediated execution. OAuth completion now creates a governed connection, and signed host routes can invoke a selected agent's granted read tool or dispatch a consequential tool after an exact approval. The unsafe conversation tool injection has been deleted. Installing a remote extension or skill is separate from connecting an account and enabling it for an agent. The Web catalog still supplies no reviewed tool declarations, so its one-click account links do not yet become usable agent tools.
+The package has useful foundations but is **not yet a production-ready, one-click connector platform**. The governed integration path models declarations, user-owned connections, grants, conformance and mediated execution. OAuth completion now creates a governed connection, and signed host routes can invoke a selected agent's granted read tool or dispatch a consequential tool after an exact approval. The unsafe conversation tool injection has been deleted. Installing a remote extension or skill is separate from connecting an account and enabling it for an agent. The Web catalog now consumes immutable deployment-reviewed packages with declared capabilities. One Connect action installs the exact selected digest and begins provider OAuth; selected-agent grants remain explicit. Conversation consumption and independent provider certification remain release gates.
 
 This review covers the checked-out `vox-connections`, its consuming `vox-core` and `vox-web` code, the shared context/PRD, and the standalone host fixture. It includes local Rust tests and one lifecycle test against a disposable PostgreSQL instance; it is not a live provider, penetration, or deployment audit.
 
@@ -11,7 +11,7 @@ This review covers the checked-out `vox-connections`, its consuming `vox-core` a
 | Stage | Existing implementation | Assessment |
 | --- | --- | --- |
 | Definition | `integration_registry` stores deployment declarations; `remote_extensions` stores per-context manifests; `connected_apps` stores discovered MCP tools; `skills` stores declarative guidance. | Three overlapping capability catalogs have different lifecycle and trust rules. |
-| Install | `RemoteExtensionService::install` records an untrusted remote endpoint; skills pin an exact reviewed version. Web has a curated plugin catalog and a URL-based pending MCP form. | Installation is available, but no unified versioned package containing integration, tools, and optional skills. |
+| Install | `RemoteExtensionService::install` records an untrusted remote endpoint; skills pin an exact reviewed version. Web discovers reviewed packages through Core and retains a URL-based pending MCP form. | Atomic digest-bound installation is available; optional bundled skills and automatic material upgrades remain incomplete. |
 | Connect | `ConnectedAppsService::begin/complete` performs MCP OAuth, stores encrypted tokens, and creates an `external_connections` record. The generic initiation, callback, and host-asserted authorization stubs were removed. | Authorization joins the governed connection/grant model, but discovered names are usable only when they match reviewed declarations. |
 | Agent exposure | `CapabilityGrantService::effective_for_agent` checks context, selected agent, connection, authorization, and declaration. A signed host route invokes only granted declared reads. The conversation request has no selected agent, so it injects no MCP tools. | Host isolation is enforced; product-level agent selection and skill loading remain incomplete. |
 | Execution | Core consumes exact user approvals into durable executions before dispatching consequential MCP calls. Ambiguous outcomes remain reconciling. The former direct model-call and inferred-effect path has been deleted. | The approval path is wired, but independent conformance, provider confirmation and reconciliation, and MCP version compatibility remain release gates. |
@@ -37,7 +37,7 @@ Before this review, `RemoteExtensionService::update` changed `endpoint_url` whil
 
 ### P1 — The developer interface is fragmented
 
-A developer has to understand deployment integration declarations, per-user remote manifests, OAuth client configuration, dynamic MCP tool inventory, skill packages, and host-specific catalog entries. A small `vox-connector-check` command now validates the install manifest locally with the same shape checks as the server and emits its canonical digest. There is still no unified publish path, version promotion, or end-to-end sandbox that makes a connector work without Core or Web edits. The MCP guide remains a local authoring path, not a connect-and-use quickstart. **Target:** one versioned connector manifest with identity/operator, endpoint/protocol, auth mode, declared capabilities/effects/input schemas/recipients, optional skill references, and immutable content digest. Keep deployment policy and user grants as separate records. Extend the check command to connect in a local sandbox, compare discovered tools with declarations, and run conformance fixtures. Installing the package should be one user action; OAuth, scope review, agent selection/grant, and action approval remain explicit steps in that same journey.
+A developer has to understand deployment integration declarations, per-user remote manifests, OAuth client configuration, dynamic MCP tool inventory, skill packages, and host-specific catalog entries. A small `vox-connector-check` command now validates the install manifest locally with the same shape checks as the server and emits its canonical digest. A deployment-scoped `PackageRegistry` now provides immutable publication, bounded discovery, atomic digest-bound installation and withdrawal through shared Rust and signed Core interfaces. New MCP manifests appear in Web without Core or Web edits. Independent behavioral conformance and optional bundled skills remain incomplete. The MCP guide remains a local authoring path, not a connect-and-use quickstart. **Target:** one versioned connector manifest with identity/operator, endpoint/protocol, auth mode, declared capabilities/effects/input schemas/recipients, optional skill references, and immutable content digest. Keep deployment policy and user grants as separate records. Extend the check command to connect in a local sandbox, compare discovered tools with declarations, and run conformance fixtures. Installing the package should be one user action; OAuth, scope review, agent selection/grant, and action approval remain explicit steps in that same journey.
 
 ### P1 — Skill and MCP consumption are incomplete as a platform interface
 
@@ -49,7 +49,7 @@ The OAuth client now probes `server/discover` for the 2026-07-28 stateless proto
 
 ### P1 — Operational and package trust surface is unfinished
 
-The Web plugin catalog is compiled into the frontend, and availability depends on static allowlisting or configured OAuth clients. There is no unified operator catalog, package signature/provenance check, staged rollout, health/degraded state, tenant policy, or rollback across the three catalogs. `integration_registry::register` disables a new version and revokes existing grants, which is conservative, but it also expires all authorized connections even for metadata-only changes. **Target:** promote immutable versions through draft → validated → enabled; compare material declaration changes and request renewed consent only where needed; make availability and reasons visible to hosts. Keep credentials and grant state out of portable package contents.
+The Web catalog now reads the operator catalog; static entries contain optional branding only and the old frontend allowlist has been deleted. Publication pins the declaration digest and preserves its operator evidence. Withdrawals transactionally disable bound extensions, clear credentials/sessions and revoke accounts/grants. Cryptographic provenance, staged rollout, health/degraded state, richer tenant policy and automatic material upgrades remain incomplete. `integration_registry::register` disables a new version and revokes existing grants, which is conservative, but it also expires all authorized connections even for metadata-only changes. **Target:** promote immutable versions through draft → validated → enabled; compare material declaration changes and request renewed consent only where needed; make availability and reasons visible to hosts. Keep credentials and grant state out of portable package contents.
 
 ## Minimal target architecture
 
@@ -85,7 +85,7 @@ The external seam should be small and protocol-neutral. MCP, direct provider API
 - Consolidated Core's active connection, execution, quota, and status references on `external_connections`; a forward migration drops the old `connections` table. The independent-host reference schema now has the same single connection table.
 - Web displays the reported tools without claiming their effects are verified, and labels OAuth success as account linking rather than agent readiness.
 
-The selected-agent grant and authenticated approval seams now exist for signed host calls. Unified package authoring, full conversation consumption, independent conformance, provider reconciliation, and protocol compatibility remain open. The static Web catalog's empty capability declarations mean its account links cannot yet be used by an agent.
+The selected-agent grant and authenticated approval seams now exist for signed host calls. Immutable package publication/discovery/installation now exists. Full conversation consumption, optional bundled skills, independent conformance, provider reconciliation and protocol compatibility remain open.
 
 ## Verification of this change set
 
@@ -94,3 +94,13 @@ The selected-agent grant and authenticated approval seams now exist for signed h
 - `vox-web`: TypeScript, 100 unit tests, lint, and production build passed. The one database-backed OTP test was skipped by its existing test condition. There is no plugin-specific Playwright test in the repository.
 
 These checks do not establish provider interoperability or production approval safety. No live OAuth provider or remote MCP server was exercised.
+
+## Package catalog follow-up — 2026-09-28
+
+Package installations use the same extension lifecycle code in one database
+transaction, avoiding nested pool acquisition and partial install state. The
+single-connection concurrent retry test caught and prevented a lock-order
+regression. Web's manifest-only browser fixture exercises dynamic discovery,
+installation, OAuth return and the explicit agent-access handoff. The linked
+account dock also derives from installed extensions instead of static brands.
+See [package onboarding](packages.md) for the implemented contract and limits.

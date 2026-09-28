@@ -457,12 +457,25 @@ impl RemoteExtensionService {
         context: &impl RequestScope,
         request: InstallExtensionRequest,
     ) -> Result<RemoteExtension, RemoteExtensionError> {
+        let mut tx = self.db.begin().await?;
+        let id = self
+            .install_in_transaction(context, request, &mut tx)
+            .await?;
+        let extension = self.get_in_transaction(context, id, &mut tx).await?;
+        tx.commit().await?;
+        Ok(extension)
+    }
+
+    pub(crate) async fn install_in_transaction(
+        &self,
+        context: &impl RequestScope,
+        request: InstallExtensionRequest,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<Uuid, RemoteExtensionError> {
         Self::validate_install_request(&request, self.allow_local_endpoints)?;
         let external_key = Self::validate_key(&request.external_key)?;
         let display_name = Self::validate_key(&request.display_name)?;
         let endpoint_url = self.validate_endpoint_url(&request.endpoint_url)?;
-
-        let mut tx = self.db.begin().await?;
 
         let existing = sqlx::query(
             "SELECT id, current_version, lifecycle_state FROM remote_extensions \
@@ -470,7 +483,7 @@ impl RemoteExtensionService {
         )
         .bind(context.request_context().id.0)
         .bind(&external_key)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?;
 
         if let Some(row) = existing {
@@ -501,7 +514,7 @@ impl RemoteExtensionService {
             .bind(&request.operator.operator_id)
             .bind(&request.operator.operator_name)
             .bind(&capabilities_json)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
 
             sqlx::query(
@@ -521,11 +534,10 @@ impl RemoteExtensionService {
             .bind(&request.operator.support_email)
             .bind(&request.operator.terms_url)
             .bind(next_version)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
 
-            tx.commit().await?;
-            return self.get(context, extension_id).await;
+            return Ok(extension_id);
         }
 
         let extension_id = sqlx::query_scalar::<_, Uuid>(
@@ -546,7 +558,7 @@ impl RemoteExtensionService {
         .bind(&request.operator.operator_name)
         .bind(&request.operator.support_email)
         .bind(&request.operator.terms_url)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
 
         let capabilities_json = serde_json::to_value(&request.capabilities)
@@ -565,27 +577,10 @@ impl RemoteExtensionService {
         .bind(&request.operator.operator_id)
         .bind(&request.operator.operator_name)
         .bind(&capabilities_json)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
-        tx.commit().await?;
-
-        Ok(RemoteExtension {
-            id: extension_id,
-            external_key,
-            display_name,
-            protocol: request.protocol,
-            endpoint_url,
-            operator: request.operator,
-            current_version: 1,
-            conformance_status: ConformanceStatus::Pending,
-            operator_enabled: false,
-            consent_status: ConsentStatus::Consented,
-            lifecycle_state: LifecycleState::Installed,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            capabilities: request.capabilities,
-        })
+        Ok(extension_id)
     }
 
     pub async fn record_conformance(
@@ -597,14 +592,38 @@ impl RemoteExtensionService {
         report: Value,
     ) -> Result<RemoteExtension, RemoteExtensionError> {
         let mut tx = self.db.begin().await?;
+        self.record_conformance_in_transaction(
+            context,
+            extension_id,
+            version,
+            passed,
+            report,
+            &mut tx,
+        )
+        .await?;
+        let extension = self
+            .get_in_transaction(context, extension_id, &mut tx)
+            .await?;
+        tx.commit().await?;
+        Ok(extension)
+    }
 
+    pub(crate) async fn record_conformance_in_transaction(
+        &self,
+        context: &impl RequestScope,
+        extension_id: Uuid,
+        version: i32,
+        passed: bool,
+        report: Value,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), RemoteExtensionError> {
         let row = sqlx::query(
             "SELECT current_version, operator_enabled, consent_status, lifecycle_state \
              FROM remote_extensions WHERE id = $1 AND user_context_id = $2 FOR UPDATE",
         )
         .bind(extension_id)
         .bind(context.request_context().id.0)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?
         .ok_or(RemoteExtensionError::NotFound)?;
 
@@ -623,7 +642,7 @@ impl RemoteExtensionService {
         .bind(version)
         .bind(status_str)
         .bind(&report)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
         sqlx::query(
@@ -635,7 +654,7 @@ impl RemoteExtensionService {
         .bind(version)
         .bind(status_str)
         .bind(&report)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
         if version == current_version {
@@ -656,12 +675,11 @@ impl RemoteExtensionService {
             .bind(extension_id)
             .bind(status_str)
             .bind(&lifecycle_state_str)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
         }
 
-        tx.commit().await?;
-        self.get(context, extension_id).await
+        Ok(())
     }
 
     pub async fn set_operator_enabled(
@@ -671,14 +689,29 @@ impl RemoteExtensionService {
         enabled: bool,
     ) -> Result<RemoteExtension, RemoteExtensionError> {
         let mut tx = self.db.begin().await?;
+        self.set_operator_enabled_in_transaction(context, extension_id, enabled, &mut tx)
+            .await?;
+        let extension = self
+            .get_in_transaction(context, extension_id, &mut tx)
+            .await?;
+        tx.commit().await?;
+        Ok(extension)
+    }
 
+    pub(crate) async fn set_operator_enabled_in_transaction(
+        &self,
+        context: &impl RequestScope,
+        extension_id: Uuid,
+        enabled: bool,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), RemoteExtensionError> {
         let row = sqlx::query(
             "SELECT conformance_status, consent_status, lifecycle_state \
              FROM remote_extensions WHERE id = $1 AND user_context_id = $2 FOR UPDATE",
         )
         .bind(extension_id)
         .bind(context.request_context().id.0)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?
         .ok_or(RemoteExtensionError::NotFound)?;
 
@@ -691,6 +724,11 @@ impl RemoteExtensionService {
         }
         if current_state == "removed" {
             return Err(RemoteExtensionError::NotActive(LifecycleState::Removed));
+        }
+
+        if enabled && !crate::packages::installed_package_available(&mut **tx, extension_id).await?
+        {
+            return Err(RemoteExtensionError::NotActive(LifecycleState::Disabled));
         }
 
         let new_state = if enabled {
@@ -711,11 +749,10 @@ impl RemoteExtensionService {
         .bind(extension_id)
         .bind(enabled)
         .bind(new_state)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
-        tx.commit().await?;
-        self.get(context, extension_id).await
+        Ok(())
     }
 
     pub async fn update(
@@ -1021,6 +1058,10 @@ impl RemoteExtensionService {
         .await?
         .ok_or(RemoteExtensionError::NotFound)?;
 
+        if !crate::packages::installed_package_available(&self.db, extension_id).await? {
+            return Err(RemoteExtensionError::NotActive(LifecycleState::Disabled));
+        }
+
         let state_str: String = row.get("lifecycle_state");
         let lifecycle_state =
             LifecycleState::parse(&state_str).ok_or(RemoteExtensionError::Invalid)?;
@@ -1069,6 +1110,26 @@ impl RemoteExtensionService {
         context: &impl RequestScope,
         extension_id: Uuid,
     ) -> Result<RemoteExtension, RemoteExtensionError> {
+        self.get_with_executor(context, extension_id, &self.db)
+            .await
+    }
+
+    pub(crate) async fn get_in_transaction(
+        &self,
+        context: &impl RequestScope,
+        extension_id: Uuid,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<RemoteExtension, RemoteExtensionError> {
+        self.get_with_executor(context, extension_id, &mut **tx)
+            .await
+    }
+
+    async fn get_with_executor<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        context: &impl RequestScope,
+        extension_id: Uuid,
+        executor: E,
+    ) -> Result<RemoteExtension, RemoteExtensionError> {
         let row = sqlx::query(
             "SELECT e.id, e.external_key, e.display_name, e.protocol, e.endpoint_url, \
                     e.operator_id, e.operator_name, e.support_email, e.terms_url, e.current_version, \
@@ -1080,7 +1141,7 @@ impl RemoteExtensionService {
         )
         .bind(extension_id)
         .bind(context.request_context().id.0)
-        .fetch_optional(&self.db)
+        .fetch_optional(executor)
         .await?
         .ok_or(RemoteExtensionError::NotFound)?;
 
@@ -1149,22 +1210,29 @@ async fn revoke_extension_authority(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     extension_id: Uuid,
 ) -> Result<(), sqlx::Error> {
+    revoke_extensions_authority(tx, &[extension_id]).await
+}
+
+pub(crate) async fn revoke_extensions_authority(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    extension_ids: &[Uuid],
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE external_connections SET authorization_state='revoked', \
          authorized_capabilities='{}'::text[], expires_at=NULL, failure_code=NULL, \
          revoked_at=COALESCE(revoked_at,now()), updated_at=now() \
-         WHERE remote_extension_id=$1",
+         WHERE remote_extension_id=ANY($1)",
     )
-    .bind(extension_id)
+    .bind(extension_ids)
     .execute(&mut **tx)
     .await?;
     sqlx::query(
         "UPDATE agent_capability_grants SET state='revoked', \
          revoked_at=COALESCE(revoked_at,now()), updated_at=now() \
-         WHERE connection_id IN (SELECT id FROM external_connections WHERE remote_extension_id=$1) \
+         WHERE connection_id IN (SELECT id FROM external_connections WHERE remote_extension_id=ANY($1)) \
          AND state='enabled'",
     )
-    .bind(extension_id)
+    .bind(extension_ids)
     .execute(&mut **tx)
     .await?;
     Ok(())
