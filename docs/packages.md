@@ -73,7 +73,9 @@ lock scoped to the user context. Extension creation, reviewed read activation
 and package binding commit together using one pool connection. A changed
 existing declaration conflicts; the install route never silently replaces an
 endpoint or expands old grants. Material upgrades currently require the
-explicit extension update/reconsent/reconnect/regrant journey.
+explicit extension update/reconsent/reconnect/regrant journey. A disabled or
+quarantined installation is never revived by a catalog retry; it needs
+operator review or removal before a fresh installation.
 
 ## Withdrawal and limits
 
@@ -81,8 +83,9 @@ An authenticated operator calls `POST /v1/connector-packages/withdraw` with
 `deployment_id`, `external_key` and `version`. Withdrawal hides the package,
 blocks new installs, disables bound extensions, clears platform credentials
 and pending OAuth sessions, and revokes their accounts and agent grants in one
-transaction. Declarations and evidence remain readable. The MCP dispatch path
-also rejects withdrawn or mismatched package declarations. In-flight provider
+transaction. Declarations and evidence remain readable. OAuth start, callback persistence, operator activation and both invocation
+paths share one withdrawn/mismatched package check. Session creation rechecks
+the endpoint/version under the extension lock after provider discovery. In-flight provider
 requests cannot be undone by deleting local credentials; provider-side
 revocation and consequential outcome reconciliation remain separate gates.
 

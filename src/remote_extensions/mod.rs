@@ -726,6 +726,11 @@ impl RemoteExtensionService {
             return Err(RemoteExtensionError::NotActive(LifecycleState::Removed));
         }
 
+        if enabled && !crate::packages::installed_package_available(&mut **tx, extension_id).await?
+        {
+            return Err(RemoteExtensionError::NotActive(LifecycleState::Disabled));
+        }
+
         let new_state = if enabled {
             if conformance_status == "passed" && consent_status == "consented" {
                 "active"
@@ -1052,6 +1057,10 @@ impl RemoteExtensionService {
         .fetch_optional(&self.db)
         .await?
         .ok_or(RemoteExtensionError::NotFound)?;
+
+        if !crate::packages::installed_package_available(&self.db, extension_id).await? {
+            return Err(RemoteExtensionError::NotActive(LifecycleState::Disabled));
+        }
 
         let state_str: String = row.get("lifecycle_state");
         let lifecycle_state =

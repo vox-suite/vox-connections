@@ -164,6 +164,9 @@ impl PackageRegistry {
         {
             return Err(PackageError::Conflict);
         }
+        // Binding and extension state commit together using one pool connection.
+        sqlx::query("INSERT INTO connector_package_installations(extension_id,deployment_id,external_key,version) VALUES ($1,$2,$3,$4) ON CONFLICT (extension_id) DO UPDATE SET version=EXCLUDED.version,installed_at=now()")
+            .bind(extension.id).bind(scope.subject.deployment_id.0).bind(key).bind(version).execute(&mut *tx).await?;
         // Only an operator's explicit effect-verification evidence can carry
         // read conformance across installations. Writes require their own
         // behavioral conformance and remain disabled after package install.
@@ -199,9 +202,6 @@ impl PackageRegistry {
                 .get_in_transaction(context, extension.id, &mut tx)
                 .await?;
         }
-        // Binding and extension state commit together using one pool connection.
-        sqlx::query("INSERT INTO connector_package_installations(extension_id,deployment_id,external_key,version) VALUES ($1,$2,$3,$4) ON CONFLICT (extension_id) DO UPDATE SET version=EXCLUDED.version,installed_at=now()")
-            .bind(extension.id).bind(scope.subject.deployment_id.0).bind(key).bind(version).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(extension)
     }
@@ -233,4 +233,30 @@ impl PackageRegistry {
         tx.commit().await?;
         Ok(())
     }
+}
+
+/// One trust check for OAuth, activation and both invocation paths. Manually
+/// registered extensions have no package binding and retain their own policy.
+pub(crate) async fn installed_package_available<
+    'e,
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+>(
+    executor: E,
+    extension_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT NOT EXISTS (SELECT 1 FROM connector_package_installations pi \
+         JOIN connector_packages p ON p.deployment_id=pi.deployment_id \
+           AND p.external_key=pi.external_key AND p.version=pi.version \
+         JOIN remote_extensions e ON e.id=pi.extension_id \
+         LEFT JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version \
+         WHERE pi.extension_id=$1 AND (NOT p.enabled \
+           OR p.manifest->>'external_key' IS DISTINCT FROM e.external_key \
+           OR p.manifest->>'endpoint_url' IS DISTINCT FROM e.endpoint_url \
+           OR p.manifest->>'protocol' IS DISTINCT FROM e.protocol \
+           OR p.manifest->'capabilities' IS DISTINCT FROM v.capabilities \
+           OR p.manifest->'operator' IS DISTINCT FROM jsonb_strip_nulls(jsonb_build_object(\
+             'operator_id',e.operator_id,'operator_name',e.operator_name,\
+             'support_email',e.support_email,'terms_url',e.terms_url))))",
+    ).bind(extension_id).fetch_one(executor).await
 }

@@ -192,7 +192,11 @@ impl ConnectedAppsService {
         let protocol: String = row.get("protocol");
         let state: String = row.get("lifecycle_state");
         let version: i32 = row.get("current_version");
-        if protocol != "mcp" || state == "removed" || state == "quarantined" {
+        if protocol != "mcp" || matches!(state.as_str(), "removed" | "quarantined" | "disabled") {
+            return Err(ConnectedAppError::Invalid);
+        }
+
+        if !crate::packages::installed_package_available(&self.db, extension_id).await? {
             return Err(ConnectedAppError::Invalid);
         }
 
@@ -211,6 +215,15 @@ impl ConnectedAppsService {
         let verifier = random_token()?;
         let oauth_state = random_token()?;
         let expires_at = Utc::now() + ChronoDuration::minutes(SESSION_TTL_MINUTES);
+        // Recheck under the extension lock after provider discovery. Withdrawal
+        // either deletes this session after commit or prevents it being created.
+        let mut tx = self.db.begin().await?;
+        let valid: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM remote_extensions WHERE id=$1 AND user_context_id=$2 AND endpoint_url=$3 AND current_version=$4 AND lifecycle_state NOT IN ('removed','quarantined','disabled') FOR UPDATE)")
+            .bind(extension_id).bind(context.request_context().id.0).bind(&endpoint).bind(version)
+            .fetch_one(&mut *tx).await?;
+        if !valid || !crate::packages::installed_package_available(&mut *tx, extension_id).await? {
+            return Err(ConnectedAppError::Expired);
+        }
         sqlx::query(
             "INSERT INTO mcp_authorization_sessions (
                 id, extension_id, user_context_id, state_hash, code_verifier_ciphertext,
@@ -231,8 +244,10 @@ impl ConnectedAppsService {
         .bind(&endpoint)
         .bind(version)
         .bind(expires_at)
-        .execute(&self.db)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
 
         let mut url = Url::parse(&discovery.metadata.authorization_endpoint)
             .map_err(|_| ConnectedAppError::Provider("invalid authorization endpoint".into()))?;
@@ -413,8 +428,13 @@ impl ConnectedAppsService {
             || version != session.get::<i32, _>("current_version")
             || matches!(
                 session.get::<String, _>("lifecycle_state").as_str(),
-                "removed" | "quarantined"
+                "removed" | "quarantined" | "disabled"
             )
+        {
+            return Err(ConnectedAppError::Expired);
+        }
+        if !crate::packages::installed_package_available(&mut *tx, session.get("extension_id"))
+            .await?
         {
             return Err(ConnectedAppError::Expired);
         }
@@ -526,8 +546,11 @@ impl ConnectedAppsService {
         let state: String = current.get("lifecycle_state");
         if current_endpoint != expected_endpoint
             || expected_version != current_version
-            || matches!(state.as_str(), "removed" | "quarantined")
+            || matches!(state.as_str(), "removed" | "quarantined" | "disabled")
         {
+            return Err(ConnectedAppError::Expired);
+        }
+        if !crate::packages::installed_package_available(&mut *tx, extension_id).await? {
             return Err(ConnectedAppError::Expired);
         }
         let session_still_valid: bool = sqlx::query_scalar(
@@ -728,12 +751,6 @@ impl ConnectedAppsService {
                AND (x.expires_at IS NULL OR x.expires_at>now()) \
                AND $3=ANY(x.authorized_capabilities) \
                AND e.lifecycle_state='active' AND e.consent_status='consented' \
-               AND NOT EXISTS (SELECT 1 FROM connector_package_installations pi \
-                   JOIN connector_packages p ON p.deployment_id=pi.deployment_id \
-                     AND p.external_key=pi.external_key AND p.version=pi.version \
-                   WHERE pi.extension_id=e.id AND (NOT p.enabled \
-                     OR p.manifest->>'endpoint_url'<>e.endpoint_url \
-                     OR p.manifest->'capabilities'<>v.capabilities)) \
                AND EXISTS (SELECT 1 FROM agent_capability_grants g \
                    JOIN agent_definitions a ON a.id=g.agent_definition_id \
                    JOIN deployment_agent_selections s ON s.agent_definition_id=a.id \
@@ -779,6 +796,9 @@ impl ConnectedAppsService {
         }
         let extension_id: Uuid = row.get("extension_id");
         let endpoint: String = row.get("endpoint_url");
+        if !crate::packages::installed_package_available(&mut *tx, extension_id).await? {
+            return Err(ConnectedAppError::GrantRequired);
+        }
         let token = self.cipher()?.open(
             &aad(extension_id, "access"),
             &row.get::<Vec<u8>, _>("access_token_ciphertext"),

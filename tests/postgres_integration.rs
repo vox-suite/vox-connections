@@ -239,6 +239,57 @@ async fn independently_registered_host_can_install_skill_and_extension() {
             .await
             .expect("withdraw account state");
     assert_eq!(state, "revoked");
+    assert!(
+        extensions
+            .set_operator_enabled(&context, first.id, true)
+            .await
+            .is_err(),
+        "operator reenablement must not revive a withdrawn package"
+    );
+    // Even an out-of-band lifecycle change cannot bypass the package's trust
+    // boundary at OAuth start/callback or the generic endpoint authorization seam.
+    sqlx::query(
+        "UPDATE remote_extensions SET lifecycle_state='active',operator_enabled=true WHERE id=$1",
+    )
+    .bind(first.id)
+    .execute(&pool)
+    .await
+    .expect("force stale active fixture");
+    assert!(
+        extensions
+            .authorize_call(&context, first.id, &manifest.capabilities[0].external_key)
+            .await
+            .is_err()
+    );
+    let package_apps = ConnectedAppsService::from_options(
+        pool.clone(),
+        ConnectedAppsOptions {
+            credential_key: Some("00".repeat(32)),
+            redirect_uris: vec!["https://host.example/callback".into()],
+            ..ConnectedAppsOptions::default()
+        },
+    );
+    assert!(matches!(
+        package_apps
+            .begin(&context, first.id, "https://host.example/callback")
+            .await,
+        Err(ConnectedAppError::Invalid)
+    ));
+    let withdrawn_state = format!("withdrawn-oauth-{suffix}");
+    sqlx::query("INSERT INTO mcp_authorization_sessions (extension_id,user_context_id,state_hash,code_verifier_ciphertext,issuer,token_endpoint,client_id,redirect_uri,resource,endpoint_url,extension_version,expires_at) VALUES ($1,$2,$3,$4,'https://example.com','https://example.com/token','client','https://host.example/callback',$5,$5,1,now() + interval '10 minutes')")
+        .bind(first.id).bind(context_id).bind(vox_connections::connected_apps::crypto::sha256_hex(&withdrawn_state))
+        .bind(vec![4_u8,5,6]).bind(&manifest.endpoint_url).execute(&pool).await.expect("stale withdrawn session");
+    assert!(matches!(
+        package_apps
+            .complete(&context, &withdrawn_state, "code")
+            .await,
+        Err(ConnectedAppError::Expired)
+    ));
+    packages
+        .withdraw(deployment_id, &manifest.external_key, 1)
+        .await
+        .expect("idempotent withdrawal clears stale state");
+
     let mut write_manifest = manifest.clone();
     write_manifest.external_key = "reviewed-write-fixture".into();
     for capability in &mut write_manifest.capabilities {
