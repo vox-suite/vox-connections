@@ -703,12 +703,116 @@ impl ConnectedAppsService {
         Ok(())
     }
 
+    /// Refresh only credentials close to expiry. A bounded batch prevents a
+    /// catalog read from contacting an unbounded number of providers.
+    async fn refresh_due(&self, context: &impl RequestScope) -> Result<(), ConnectedAppError> {
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT x.id FROM external_connections x \
+             JOIN remote_extensions e ON e.id=x.remote_extension_id \
+             JOIN remote_extension_credentials c ON c.extension_id=e.id \
+             WHERE x.user_context_id=$1 AND x.authorization_state='authorized' \
+               AND e.lifecycle_state='active' AND c.auth_mode='oauth' \
+               AND c.refresh_token_ciphertext IS NOT NULL \
+               AND c.expires_at <= now() + interval '2 minutes' \
+             ORDER BY c.expires_at, x.id LIMIT 8",
+        )
+        .bind(context.request_context().id.0)
+        .fetch_all(&self.db)
+        .await?;
+        for id in ids {
+            if let Err(error) = self.refresh_one(context, id).await {
+                tracing::warn!(connection_id=%id, %error, "connected app token refresh failed");
+            }
+        }
+        Ok(())
+    }
+
+    /// Lock the account and its credential across refresh so rotating refresh
+    /// tokens cannot race across Core processes. Dispatch still rechecks the
+    /// account, grant, package, and declaration after this transaction commits.
+    async fn refresh_one(
+        &self,
+        context: &impl RequestScope,
+        connection_id: Uuid,
+    ) -> Result<(), ConnectedAppError> {
+        let mut tx = self.db.begin().await?;
+        let row = sqlx::query(
+            "SELECT e.id AS extension_id,e.endpoint_url,c.issuer,c.token_endpoint, \
+                    c.client_id,c.resource,c.refresh_token_ciphertext,c.expires_at,c.scope \
+             FROM external_connections x \
+             JOIN remote_extensions e ON e.id=x.remote_extension_id \
+             JOIN remote_extension_credentials c ON c.extension_id=e.id \
+             WHERE x.id=$1 AND x.user_context_id=$2 \
+               AND x.authorization_state='authorized' AND e.lifecycle_state='active' \
+               AND c.auth_mode='oauth' AND c.refresh_token_ciphertext IS NOT NULL \
+               AND c.expires_at <= now() + interval '2 minutes' \
+             FOR UPDATE OF x,e,c",
+        )
+        .bind(connection_id)
+        .bind(context.request_context().id.0)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            return Ok(());
+        };
+        let extension_id: Uuid = row.get("extension_id");
+        let endpoint: String = row.get("endpoint_url");
+        let issuer: String = row.get("issuer");
+        let token_endpoint: String = row.get("token_endpoint");
+        let client_id: String = row.get("client_id");
+        let resource: String = row.get("resource");
+        let refresh = self.cipher()?.open(
+            &aad(extension_id, "refresh"),
+            &row.get::<Vec<u8>, _>("refresh_token_ciphertext"),
+        )?;
+        let (secret, auth_method, send_resource) = self
+            .client_credentials(&endpoint, &issuer, &client_id, None)
+            .await?;
+        let request = TokenRequest {
+            token_endpoint: &token_endpoint,
+            client_id: &client_id,
+            client_secret: secret.as_deref(),
+            auth_method: &auth_method,
+            resource: send_resource.then_some(resource.as_str()),
+        };
+        let tokens = oauth::refresh(&request, &refresh, self.allow_local).await?;
+        let seconds = tokens
+            .expires_in
+            .filter(|seconds| *seconds > 0)
+            .ok_or_else(|| {
+                ConnectedAppError::Provider("token refresh did not include a valid expiry".into())
+            })?;
+        let access = self
+            .cipher()?
+            .seal(&aad(extension_id, "access"), &tokens.access_token)?;
+        let rotated_refresh = tokens
+            .refresh_token
+            .as_deref()
+            .map(|token| self.cipher()?.seal(&aad(extension_id, "refresh"), token))
+            .transpose()?;
+        sqlx::query(
+            "UPDATE remote_extension_credentials SET access_token_ciphertext=$2, \
+             refresh_token_ciphertext=COALESCE($3,refresh_token_ciphertext), \
+             expires_at=$4,scope=COALESCE($5,scope),updated_at=now() WHERE extension_id=$1",
+        )
+        .bind(extension_id)
+        .bind(access)
+        .bind(rotated_refresh)
+        .bind(Utc::now() + ChronoDuration::seconds(seconds))
+        .bind(tokens.scope)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// The user's authorized accounts with the tools each app reported.
     /// Reported tools are display data, not execution authority.
     pub async fn connections(
         &self,
         context: &impl RequestScope,
     ) -> Result<Vec<Value>, ConnectedAppError> {
+        self.refresh_due(context).await?;
         let rows = sqlx::query(
             "SELECT c.extension_id, x.id AS connection_id, c.tools, c.connected_at, c.tools_refreshed_at, \
                     e.lifecycle_state \
@@ -762,6 +866,7 @@ impl ConnectedAppsService {
         context: &impl RequestScope,
         agent: &str,
     ) -> Result<Vec<Value>, ConnectedAppError> {
+        self.refresh_due(context).await?;
         let effective = crate::capability_grants::CapabilityGrantService::new(self.db.clone())
             .effective_for_agent(&context.request_context(), agent)
             .await
@@ -850,6 +955,11 @@ impl ConnectedAppsService {
             || serde_json::to_vec(&arguments).map_or(true, |data| data.len() > 2 * 1024 * 1024)
         {
             return Err(ConnectedAppError::Invalid);
+        }
+        // A failed early refresh must not deny a still-valid access token.
+        // The authoritative credential expiry check below denies it once stale.
+        if let Err(error) = self.refresh_one(context, connection_id).await {
+            tracing::warn!(%connection_id, %error, "connected app token refresh failed before dispatch");
         }
         let mut tx = self.db.begin().await?;
         let row = sqlx::query(
