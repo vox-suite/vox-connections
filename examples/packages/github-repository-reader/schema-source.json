@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/github/github-mcp-server",
+  "revision": "85598ba6e1256f7ebf4867b95d63b833c4549264",
+  "snapshot_paths": [
+    "pkg/github/__toolsnaps__/get_file_contents.snap",
+    "pkg/github/__toolsnaps__/list_branches.snap",
+    "pkg/github/__toolsnaps__/list_commits.snap"
+  ],
+  "live_inventory_verified": false,
+  "behavior_certified": false
+}
