@@ -256,7 +256,10 @@ impl ConnectedAppsService {
         let configured = self.configured_for(&endpoint);
         let discovery = oauth::discover(&endpoint, configured, self.allow_local).await?;
         let client_id = match configured {
-            Some(client) => client.client_id.clone(),
+            Some(client) => {
+                oauth::configured_auth_method(client)?;
+                client.client_id.clone()
+            }
             None => {
                 self.dynamic_client(&discovery.metadata, redirect_uri)
                     .await?
@@ -403,16 +406,19 @@ impl ConnectedAppsService {
         redirect_uri: Option<&str>,
     ) -> Result<(Option<String>, String, bool), ConnectedAppError> {
         if let Some(client) = self.configured_for(endpoint) {
-            let metadata = oauth::AuthServerMetadata {
-                issuer: issuer.to_string(),
-                authorization_endpoint: String::new(),
-                token_endpoint: String::new(),
-                registration_endpoint: None,
-                token_endpoint_auth_methods: Vec::new(),
-            };
+            // Refuse a deployment configuration change halfway through an
+            // authorization or refresh rather than send another client's secret.
+            if client.client_id != client_id
+                || client
+                    .issuer
+                    .as_deref()
+                    .is_some_and(|value| value != issuer)
+            {
+                return Err(ConnectedAppError::ClientNotConfigured);
+            }
             return Ok((
                 client.client_secret.clone(),
-                oauth::configured_auth_method(client, &metadata),
+                oauth::configured_auth_method(client)?,
                 client.send_resource,
             ));
         }
