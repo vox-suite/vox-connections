@@ -4,6 +4,7 @@ use uuid::Uuid;
 use vox_connections::{
     capability_grants::{CapabilityGrantService, CreateGrantRequest},
     connected_apps::{ConnectedAppError, ConnectedAppsOptions, ConnectedAppsService},
+    connections::{AuthorizationState, ConnectionService},
     identity::{DeploymentId, RequestContext, RequestSubject, UserContextId, UserId},
     integration_registry::{IntegrationRegistry, SetIntegrationEnabledRequest},
     providers::expedia::integration_declaration,
@@ -273,6 +274,50 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         .bind(first.id).bind(vec![1_u8,2,3]).execute(&pool).await.expect("package credential");
     let package_connection: Uuid = sqlx::query_scalar("INSERT INTO external_connections (user_context_id,remote_extension_id,external_account_hash,credential_custody,authorization_state,authorized_capabilities) VALUES ($1,$2,$3,'platform_held','authorized',ARRAY['echo.read']) RETURNING id")
         .bind(context_id).bind(first.id).bind(vec![9_u8;32]).fetch_one(&pool).await.expect("package account");
+    let account_listing = ConnectionService::new(pool.clone());
+    let connected_apps =
+        ConnectedAppsService::from_options(pool.clone(), ConnectedAppsOptions::default());
+    assert_eq!(
+        account_listing
+            .get(&context, package_connection)
+            .await
+            .expect("current account")
+            .authorization_state,
+        AuthorizationState::Authorized
+    );
+    sqlx::query("UPDATE remote_extension_credentials SET expires_at=now()-interval '1 second' WHERE extension_id=$1")
+        .bind(first.id).execute(&pool).await.expect("expire credential");
+    let expired = account_listing
+        .get(&context, package_connection)
+        .await
+        .expect("expired account");
+    assert_eq!(expired.authorization_state, AuthorizationState::Expired);
+    assert!(expired.expires_at.is_some());
+    assert!(
+        connected_apps
+            .connections(&context)
+            .await
+            .expect("linked account status")
+            .is_empty()
+    );
+    sqlx::query("UPDATE remote_extension_credentials SET expires_at=now()+interval '1 hour' WHERE extension_id=$1")
+        .bind(first.id).execute(&pool).await.expect("renew credential fixture");
+    assert_eq!(
+        account_listing
+            .get(&context, package_connection)
+            .await
+            .expect("renewed account")
+            .authorization_state,
+        AuthorizationState::Authorized
+    );
+    assert_eq!(
+        connected_apps
+            .connections(&context)
+            .await
+            .expect("current linked status")
+            .len(),
+        1
+    );
     packages
         .withdraw(deployment_id, &manifest.external_key, 1)
         .await
