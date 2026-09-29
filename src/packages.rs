@@ -156,6 +156,7 @@ impl PackageRegistry {
         validate_publish_review(
             &request.review,
             &digest,
+            request.version,
             &request.metadata,
             &request.manifest,
         )?;
@@ -294,7 +295,7 @@ impl PackageRegistry {
                 .capabilities
                 .iter()
                 .all(|cap| !cap.effect.is_consequential())
-            && validate_review_attestation(&review, digest, &metadata).is_ok()
+            && validate_review_attestation(&review, digest, version, &metadata).is_ok()
             && review.get("read_effects_verified").and_then(Value::as_bool) == Some(true)
             && extension.lifecycle_state == crate::remote_extensions::LifecycleState::Installed
             && extension.consent_status == crate::remote_extensions::ConsentStatus::Consented
@@ -360,6 +361,7 @@ impl PackageRegistry {
 pub fn validate_review_attestation(
     review: &Value,
     digest: &str,
+    version: i32,
     metadata: &PackageMetadata,
 ) -> Result<(), PackageError> {
     let Some(evidence) = review.get("evidence").and_then(Value::as_object) else {
@@ -367,6 +369,7 @@ pub fn validate_review_attestation(
     };
     let valid = review.get("schema_version").and_then(Value::as_u64) == Some(1)
         && review.get("package_digest").and_then(Value::as_str) == Some(digest)
+        && review.get("package_version").and_then(Value::as_i64) == Some(i64::from(version))
         && review.get("protocol_version").and_then(Value::as_str)
             == Some(metadata.protocol_version.as_str())
         && review
@@ -397,10 +400,11 @@ pub fn validate_review_attestation(
 pub fn validate_publish_review(
     review: &Value,
     digest: &str,
+    version: i32,
     metadata: &PackageMetadata,
     manifest: &InstallExtensionRequest,
 ) -> Result<(), PackageError> {
-    validate_review_attestation(review, digest, metadata)?;
+    validate_review_attestation(review, digest, version, metadata)?;
     if !manifest.capabilities.is_empty()
         && manifest
             .capabilities
@@ -475,22 +479,27 @@ mod tests {
         let valid = json!({
             "schema_version": 1,
             "package_digest": digest,
+            "package_version": 1,
             "protocol_version": metadata.protocol_version,
             "live_inventory_verified": true,
             "behavior_certified": true,
             "read_effects_verified": true,
             "evidence": {"reviewer": "independent operator", "report_digest": "b".repeat(64)}
         });
-        assert!(validate_review_attestation(&valid, &digest, &metadata).is_ok());
+        assert!(validate_review_attestation(&valid, &digest, 1, &metadata).is_ok());
+        assert!(validate_review_attestation(&valid, &digest, 2, &metadata).is_err());
         let manifest: InstallExtensionRequest =
             serde_json::from_str(include_str!("../examples/mcp/read-only-manifest.json"))
                 .expect("read fixture");
-        assert!(validate_publish_review(&valid, &digest, &metadata, &manifest).is_ok());
+        assert!(validate_publish_review(&valid, &digest, 1, &metadata, &manifest).is_ok());
         let mut unverified_read = valid.clone();
         unverified_read["read_effects_verified"] = json!(false);
-        assert!(validate_publish_review(&unverified_read, &digest, &metadata, &manifest).is_err());
+        assert!(
+            validate_publish_review(&unverified_read, &digest, 1, &metadata, &manifest).is_err()
+        );
         for (pointer, replacement) in [
             ("/package_digest", json!("c".repeat(64))),
+            ("/package_version", json!(2)),
             ("/protocol_version", json!("2026-07-28")),
             ("/live_inventory_verified", json!(false)),
             ("/behavior_certified", json!(false)),
@@ -500,7 +509,7 @@ mod tests {
             let mut stale = valid.clone();
             *stale.pointer_mut(pointer).unwrap() = replacement;
             assert!(
-                validate_review_attestation(&stale, &digest, &metadata).is_err(),
+                validate_review_attestation(&stale, &digest, 1, &metadata).is_err(),
                 "{pointer}"
             );
         }
@@ -508,6 +517,7 @@ mod tests {
             validate_review_attestation(
                 &json!({"read_effects_verified":true,"evidence":{"reviewer":"anyone"}}),
                 &digest,
+                1,
                 &metadata
             )
             .is_err()

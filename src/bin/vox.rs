@@ -138,8 +138,8 @@ async fn run() -> Result<(), String> {
             let review_path=Path::new(directory).join("review.json");
             let review:serde_json::Value=serde_json::from_slice(&fs::read(review_path).map_err(|_|"review.json must contain independent operator evidence")?).map_err(|e|e.to_string())?;
             let digest=hex::encode(Sha256::digest(package_bytes(&p.manifest,&p.metadata).map_err(|e|e.to_string())?));
-            vox_connections::packages::validate_publish_review(&review,&digest,&p.metadata,&p.manifest)
-                .map_err(|_|"review.json must attest this exact package digest, protocol, live inventory and behavior (including read effects), with a retained report digest")?;
+            vox_connections::packages::validate_publish_review(&review,&digest,p.version,&p.metadata,&p.manifest)
+                .map_err(|_|"review.json must attest this exact package version, digest, protocol, live inventory and behavior (including read effects), with a retained report digest")?;
             let deployment_id=deployment.parse().map_err(|_|"Deployment must be a UUID")?;
             let token=env::var("VOX_OPERATOR_TOKEN").map_err(|_|"VOX_OPERATOR_TOKEN is required in the environment")?;
             let url=url::Url::parse(endpoint).map_err(|e|e.to_string())?;

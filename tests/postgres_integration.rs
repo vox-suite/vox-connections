@@ -27,6 +27,7 @@ fn reviewed_package(
     json!({
         "schema_version": 1,
         "package_digest": digest,
+        "package_version": 1,
         "protocol_version": metadata.protocol_version,
         "live_inventory_verified": true,
         "behavior_certified": true,
