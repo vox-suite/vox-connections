@@ -300,6 +300,59 @@ async fn independently_registered_host_can_install_skill_and_extension() {
             .expect("linked account status")
             .is_empty()
     );
+    // A provider can rotate both tokens. Refresh must restore account
+    // availability without replacing a grant or requiring a second login.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("refresh server");
+    let port = listener.local_addr().unwrap().port();
+    let refresh_server = std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        let (mut stream, _) = listener.accept().expect("refresh request");
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut request = vec![0_u8; 4096];
+        let size = stream.read(&mut request).expect("read refresh request");
+        assert!(String::from_utf8_lossy(&request[..size]).contains("POST /token"));
+        let body = r#"{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600,"token_type":"Bearer"}"#;
+        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).expect("send rotated tokens");
+    });
+    let cipher =
+        vox_connections::connected_apps::crypto::CredentialCipher::from_hex_key(&"00".repeat(32))
+            .unwrap();
+    let mut access_aad = first.id.as_bytes().to_vec();
+    access_aad.extend_from_slice(b"access");
+    let mut refresh_aad = first.id.as_bytes().to_vec();
+    refresh_aad.extend_from_slice(b"refresh");
+    sqlx::query("UPDATE remote_extension_credentials SET token_endpoint=$2,access_token_ciphertext=$3,refresh_token_ciphertext=$4 WHERE extension_id=$1")
+        .bind(first.id)
+        .bind(format!("http://127.0.0.1:{port}/token"))
+        .bind(cipher.seal(&access_aad, "expired-access").unwrap())
+        .bind(cipher.seal(&refresh_aad, "first-refresh").unwrap())
+        .execute(&pool).await.expect("set expiring provider tokens");
+    let refreshing_apps = ConnectedAppsService::from_options(pool.clone(), ConnectedAppsOptions {
+        credential_key: Some("00".repeat(32)),
+        oauth_clients: Some(r#"{"mcp.example.com":{"client_id":"client","client_secret":"fixture-secret","send_resource":false}}"#.into()),
+        ..ConnectedAppsOptions::default()
+    }).with_local_endpoints_for_testing();
+    assert_eq!(
+        refreshing_apps
+            .connections(&context)
+            .await
+            .expect("refresh account")
+            .len(),
+        1
+    );
+    refresh_server.join().expect("refresh server completed");
+    let rotated: (Vec<u8>, Vec<u8>) = sqlx::query_as("SELECT access_token_ciphertext,refresh_token_ciphertext FROM remote_extension_credentials WHERE extension_id=$1")
+        .bind(first.id).fetch_one(&pool).await.unwrap();
+    assert_eq!(
+        cipher.open(&access_aad, &rotated.0).unwrap(),
+        "rotated-access"
+    );
+    assert_eq!(
+        cipher.open(&refresh_aad, &rotated.1).unwrap(),
+        "rotated-refresh"
+    );
     sqlx::query("UPDATE remote_extension_credentials SET expires_at=now()+interval '1 hour' WHERE extension_id=$1")
         .bind(first.id).execute(&pool).await.expect("renew credential fixture");
     assert_eq!(
