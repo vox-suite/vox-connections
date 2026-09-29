@@ -153,6 +153,12 @@ impl PackageRegistry {
             return Err(PackageError::Invalid);
         }
         let digest = hex::encode(Sha256::digest(&bytes));
+        validate_publish_review(
+            &request.review,
+            &digest,
+            &request.metadata,
+            &request.manifest,
+        )?;
         let mut tx = self.db.begin().await?;
         sqlx::query("INSERT INTO connector_packages (deployment_id,external_key,version,digest,manifest,review,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING")
             .bind(request.deployment_id).bind(&request.manifest.external_key).bind(request.version)
@@ -288,11 +294,8 @@ impl PackageRegistry {
                 .capabilities
                 .iter()
                 .all(|cap| !cap.effect.is_consequential())
+            && validate_review_attestation(&review, digest, &metadata).is_ok()
             && review.get("read_effects_verified").and_then(Value::as_bool) == Some(true)
-            && review
-                .get("evidence")
-                .and_then(Value::as_object)
-                .is_some_and(|e| !e.is_empty())
             && extension.lifecycle_state == crate::remote_extensions::LifecycleState::Installed
             && extension.consent_status == crate::remote_extensions::ConsentStatus::Consented
             && extension.conformance_status == crate::remote_extensions::ConformanceStatus::Pending
@@ -351,6 +354,65 @@ impl PackageRegistry {
     }
 }
 
+/// An operator's review is an attestation, not proof supplied by the MCP
+/// server. Bind it to the exact immutable package and a separately retained
+/// report so stale or placeholder review JSON cannot activate installs.
+pub fn validate_review_attestation(
+    review: &Value,
+    digest: &str,
+    metadata: &PackageMetadata,
+) -> Result<(), PackageError> {
+    let Some(evidence) = review.get("evidence").and_then(Value::as_object) else {
+        return Err(PackageError::Invalid);
+    };
+    let valid = review.get("schema_version").and_then(Value::as_u64) == Some(1)
+        && review.get("package_digest").and_then(Value::as_str) == Some(digest)
+        && review.get("protocol_version").and_then(Value::as_str)
+            == Some(metadata.protocol_version.as_str())
+        && review
+            .get("live_inventory_verified")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && review.get("behavior_certified").and_then(Value::as_bool) == Some(true)
+        && evidence
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .is_some_and(|name| !name.trim().is_empty() && name.len() <= 128)
+        && evidence
+            .get("report_digest")
+            .and_then(Value::as_str)
+            .is_some_and(|hash| {
+                hash.len() == 64
+                    && hash
+                        .bytes()
+                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            });
+    if valid {
+        Ok(())
+    } else {
+        Err(PackageError::Invalid)
+    }
+}
+
+pub fn validate_publish_review(
+    review: &Value,
+    digest: &str,
+    metadata: &PackageMetadata,
+    manifest: &InstallExtensionRequest,
+) -> Result<(), PackageError> {
+    validate_review_attestation(review, digest, metadata)?;
+    if !manifest.capabilities.is_empty()
+        && manifest
+            .capabilities
+            .iter()
+            .all(|cap| !cap.effect.is_consequential())
+        && review.get("read_effects_verified").and_then(Value::as_bool) != Some(true)
+    {
+        return Err(PackageError::Invalid);
+    }
+    Ok(())
+}
+
 /// One trust check for OAuth, activation and both invocation paths. Manually
 /// registered extensions have no package binding and retain their own policy.
 pub(crate) async fn installed_package_available<
@@ -399,4 +461,56 @@ pub(crate) async fn detach_package_skills(
         sqlx::query("UPDATE skill_installations i SET enabled=false,updated_at=now() WHERE i.user_context_id=$1 AND i.skill_id=$2 AND NOT i.independently_installed AND NOT EXISTS (SELECT 1 FROM connector_skill_installations b WHERE b.user_context_id=i.user_context_id AND b.skill_id=i.skill_id)").bind(context).bind(skill).execute(&mut **tx).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn review_must_bind_exact_package_and_retained_report() {
+        let metadata = PackageMetadata::oauth();
+        let digest = "a".repeat(64);
+        let valid = json!({
+            "schema_version": 1,
+            "package_digest": digest,
+            "protocol_version": metadata.protocol_version,
+            "live_inventory_verified": true,
+            "behavior_certified": true,
+            "read_effects_verified": true,
+            "evidence": {"reviewer": "independent operator", "report_digest": "b".repeat(64)}
+        });
+        assert!(validate_review_attestation(&valid, &digest, &metadata).is_ok());
+        let manifest: InstallExtensionRequest =
+            serde_json::from_str(include_str!("../examples/mcp/read-only-manifest.json"))
+                .expect("read fixture");
+        assert!(validate_publish_review(&valid, &digest, &metadata, &manifest).is_ok());
+        let mut unverified_read = valid.clone();
+        unverified_read["read_effects_verified"] = json!(false);
+        assert!(validate_publish_review(&unverified_read, &digest, &metadata, &manifest).is_err());
+        for (pointer, replacement) in [
+            ("/package_digest", json!("c".repeat(64))),
+            ("/protocol_version", json!("2026-07-28")),
+            ("/live_inventory_verified", json!(false)),
+            ("/behavior_certified", json!(false)),
+            ("/evidence/reviewer", json!("")),
+            ("/evidence/report_digest", json!("placeholder")),
+        ] {
+            let mut stale = valid.clone();
+            *stale.pointer_mut(pointer).unwrap() = replacement;
+            assert!(
+                validate_review_attestation(&stale, &digest, &metadata).is_err(),
+                "{pointer}"
+            );
+        }
+        assert!(
+            validate_review_attestation(
+                &json!({"read_effects_verified":true,"evidence":{"reviewer":"anyone"}}),
+                &digest,
+                &metadata
+            )
+            .is_err()
+        );
+    }
 }
