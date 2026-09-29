@@ -719,8 +719,13 @@ impl ConnectedAppsService {
         .bind(context.request_context().id.0)
         .fetch_all(&self.db)
         .await?;
-        for id in ids {
-            if let Err(error) = self.refresh_one(context, id).await {
+        for (id, result) in futures_util::future::join_all(
+            ids.into_iter()
+                .map(|id| async move { (id, self.refresh_one(context, id).await) }),
+        )
+        .await
+        {
+            if let Err(error) = result {
                 tracing::warn!(connection_id=%id, %error, "connected app token refresh failed");
             }
         }
