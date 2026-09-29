@@ -161,9 +161,6 @@ pub async fn discover(
                 if let Some(r) = prm.get("resource").and_then(Value::as_str) {
                     resource = r.to_string();
                 }
-                if scopes.is_empty() {
-                    scopes = strings(prm.get("scopes_supported"));
-                }
                 break;
             }
         }
@@ -439,4 +436,56 @@ pub async fn refresh(
         allow_local,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn advertised_scopes_are_not_requested_as_user_authority() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let base = format!("http://127.0.0.1:{port}");
+        let server_base = base.clone();
+        let server = std::thread::spawn(move || {
+            for _ in 0..6 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4096];
+                let count = stream.read(&mut request).unwrap();
+                let line = String::from_utf8_lossy(&request[..count]);
+                let (status, headers, body) = if line.starts_with("POST /mcp ") {
+                    (
+                        "401 Unauthorized",
+                        format!(
+                            "WWW-Authenticate: Bearer resource_metadata=\"{server_base}/.well-known/oauth-protected-resource/mcp\"\r\n"
+                        ),
+                        String::new(),
+                    )
+                } else if line.starts_with("GET /.well-known/oauth-protected-resource/mcp ") {
+                    (
+                        "200 OK",
+                        String::new(),
+                        json!({"resource":format!("{server_base}/mcp"),"authorization_servers":[format!("{server_base}/oauth")],"scopes_supported":["read","write","admin"]}).to_string(),
+                    )
+                } else if line.starts_with("GET /.well-known/oauth-authorization-server/oauth ") {
+                    (
+                        "200 OK",
+                        String::new(),
+                        json!({"issuer":format!("{server_base}/oauth"),"authorization_endpoint":format!("{server_base}/authorize"),"token_endpoint":format!("{server_base}/token")}).to_string(),
+                    )
+                } else {
+                    ("404 Not Found", String::new(), String::new())
+                };
+                write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}",body.len()).unwrap();
+                if line.starts_with("GET /.well-known/oauth-authorization-server/oauth ") {
+                    break;
+                }
+            }
+        });
+        let discovery = discover(&format!("{base}/mcp"), None, true).await.unwrap();
+        assert!(discovery.scopes.is_empty());
+        server.join().unwrap();
+    }
 }
