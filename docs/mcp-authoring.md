@@ -19,3 +19,9 @@ The probe checks the JSON-RPC response id, `2.0` envelope, and MCP `content` or 
 ## Declare a remote integration
 
 Use [the package author workflow](packages.md) for installable connectors. The package declares exact tool names and JSON input schemas, effect and recipient disclosures, auth mode, protocol, and optional bundled skills. The local `mcp_probe.py` above is a diagnostic smoke test only. Platform operator review, user authorization and agent grants remain separate from protocol discovery.
+
+## Configure a provider OAuth client
+
+For a provider without dynamic registration, the host supplies an endpoint-host map in `ConnectedAppsOptions.oauth_clients` (Core uses `VOX_MCP_OAUTH_CLIENTS`). Keep this JSON in the deployment secret store, separate from the package. A confidential client defaults to `client_secret_basic`; set `token_endpoint_auth_method` to `client_secret_post` when the provider requires credentials in the token form. The setting applies to code exchange and refresh. Unknown methods and a secret method without a secret are rejected. Public clients omit both secret and method.
+
+GitHub Apps use fine-grained app permissions, not OAuth scopes. Leave `scopes` empty and configure Post authentication, following [GitHub's token exchange contract](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app). Provider-advertised supported scopes never become requested authority automatically. Linking remains separate from package conformance and selected-agent access.

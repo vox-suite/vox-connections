@@ -20,6 +20,10 @@ pub struct ConfiguredClient {
     pub client_id: String,
     #[serde(default)]
     pub client_secret: Option<String>,
+    /// Authentication for both code exchange and refresh. Defaults to Basic
+    /// for confidential clients; providers such as GitHub require Post.
+    #[serde(default)]
+    pub token_endpoint_auth_method: Option<ConfiguredTokenAuth>,
     #[serde(default)]
     pub scopes: Vec<String>,
     /// Send the RFC 8707 `resource` parameter. Some providers reject it.
@@ -29,6 +33,14 @@ pub struct ConfiguredClient {
     /// `access_type=offline` so a refresh token is issued.
     #[serde(default)]
     pub authorize_params: HashMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub enum ConfiguredTokenAuth {
+    #[serde(rename = "client_secret_basic")]
+    Basic,
+    #[serde(rename = "client_secret_post")]
+    Post,
 }
 
 fn default_true() -> bool {
@@ -309,22 +321,12 @@ pub async fn register(
     )))
 }
 
-pub fn configured_auth_method(client: &ConfiguredClient, metadata: &AuthServerMetadata) -> String {
-    match &client.client_secret {
-        None => "none".into(),
-        Some(_)
-            if metadata
-                .token_endpoint_auth_methods
-                .iter()
-                .any(|m| m == "client_secret_post")
-                && !metadata
-                    .token_endpoint_auth_methods
-                    .iter()
-                    .any(|m| m == "client_secret_basic") =>
-        {
-            "client_secret_post".into()
-        }
-        Some(_) => "client_secret_basic".into(),
+pub fn configured_auth_method(client: &ConfiguredClient) -> Result<String, ConnectedAppError> {
+    match (&client.client_secret, client.token_endpoint_auth_method) {
+        (None, None) => Ok("none".into()),
+        (None, Some(_)) => Err(ConnectedAppError::ClientNotConfigured),
+        (Some(_), Some(ConfiguredTokenAuth::Post)) => Ok("client_secret_post".into()),
+        (Some(_), _) => Ok("client_secret_basic".into()),
     }
 }
 
@@ -441,6 +443,102 @@ pub async fn refresh(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_authentication_is_validated() {
+        let parse = |value| serde_json::from_value::<ConfiguredClient>(value).unwrap();
+        let public = parse(json!({"client_id":"public"}));
+        assert_eq!(configured_auth_method(&public).unwrap(), "none");
+        let basic = parse(json!({"client_id":"private","client_secret":"test-secret"}));
+        assert_eq!(
+            configured_auth_method(&basic).unwrap(),
+            "client_secret_basic"
+        );
+        let missing =
+            parse(json!({"client_id":"private","token_endpoint_auth_method":"client_secret_post"}));
+        assert!(configured_auth_method(&missing).is_err());
+        assert!(
+            serde_json::from_value::<ConfiguredClient>(
+                json!({"client_id":"private","token_endpoint_auth_method":"typo"})
+            )
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_post_authenticates_code_exchange_and_refresh() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for grant in ["authorization_code", "refresh_token"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let (header_end, body_len) = loop {
+                    let mut chunk = [0; 4096];
+                    let size = stream.read(&mut chunk).unwrap();
+                    assert!(size > 0);
+                    request.extend_from_slice(&chunk[..size]);
+                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                        let len: usize = headers
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:"))
+                            .unwrap()
+                            .trim()
+                            .parse()
+                            .unwrap();
+                        if request.len() >= end + 4 + len {
+                            assert!(!headers.contains("authorization:"));
+                            break (end + 4, len);
+                        }
+                    }
+                };
+                let form: HashMap<_, _> =
+                    url::form_urlencoded::parse(&request[header_end..header_end + body_len])
+                        .into_owned()
+                        .collect();
+                assert_eq!(form["client_id"], "test-client");
+                assert_eq!(form["client_secret"], "test-secret");
+                assert_eq!(form["grant_type"], grant);
+                let body = r#"{"access_token":"test-access","expires_in":3600}"#;
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let client: ConfiguredClient = serde_json::from_value(json!({"client_id":"test-client","client_secret":"test-secret","token_endpoint_auth_method":"client_secret_post"})).unwrap();
+        let method = configured_auth_method(&client).unwrap();
+        let request = TokenRequest {
+            token_endpoint: &endpoint,
+            client_id: &client.client_id,
+            client_secret: client.client_secret.as_deref(),
+            auth_method: &method,
+            resource: None,
+        };
+        assert_eq!(
+            exchange_code(
+                &request,
+                "test-code",
+                "test-verifier",
+                "https://host.example/callback",
+                true
+            )
+            .await
+            .unwrap()
+            .access_token,
+            "test-access"
+        );
+        assert_eq!(
+            refresh(&request, "test-refresh", true)
+                .await
+                .unwrap()
+                .access_token,
+            "test-access"
+        );
+        server.join().unwrap();
+    }
 
     #[tokio::test]
     async fn advertised_scopes_are_not_requested_as_user_authority() {
