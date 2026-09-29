@@ -12,11 +12,12 @@ cargo run --bin vox -- package test ./my-integration --sandbox
 
 `package check` validates the full package and referenced local skills and prints the canonical digest. `package test` uses a local/test MCP endpoint and checks negotiated protocol, reported tool names and exact input schemas. Set `VOX_TEST_ACCESS_TOKEN` if the test server requires a credential. It does **not** certify provider effects, OAuth, production availability or consequential outcomes.
 
-The deployment operator independently reviews provider behavior and records `review.json`. The review must bind the exact digest printed by `package check`, the negotiated protocol, verified live inventory, behavior certification, and the SHA-256 digest of a separately retained test report. For example (replace every value with real evidence):
+The deployment operator independently reviews provider behavior and records `review.json`. The review must bind the exact package version and digest printed by `package check`, the negotiated protocol, verified live inventory, behavior certification, and the SHA-256 digest of a separately retained test report. For example (replace every value with real evidence):
 
 ```json
 {
   "schema_version": 1,
+  "package_version": 1,
   "package_digest": "<64 lowercase hex characters from package check>",
   "protocol_version": "2025-11-25",
   "live_inventory_verified": true,
