@@ -715,7 +715,9 @@ impl ConnectedAppsService {
              FROM remote_extension_credentials c JOIN remote_extensions e ON e.id = c.extension_id \
              JOIN external_connections x ON x.remote_extension_id=e.id AND x.user_context_id=e.user_context_id \
              WHERE e.user_context_id = $1 AND e.lifecycle_state <> 'removed' \
-             AND x.authorization_state='authorized'",
+             AND x.authorization_state='authorized' \
+             AND (x.expires_at IS NULL OR x.expires_at>now()) \
+             AND (c.expires_at IS NULL OR c.expires_at>now())",
         )
         .bind(context.request_context().id.0)
         .fetch_all(&self.db)

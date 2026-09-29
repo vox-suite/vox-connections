@@ -61,10 +61,15 @@ impl ConnectionService {
     /// Returns only connections owned by this authenticated host user context.
     pub async fn list(&self, context: &RequestContext) -> Result<Vec<Connection>, ConnectionError> {
         let rows = sqlx::query(
-            "SELECT c.id, COALESCE(i.external_key,e.external_key) AS external_key, c.account_display_id, c.credential_custody, c.authorization_state, \
-             c.authorized_capabilities, c.expires_at, c.failure_code \
+            "SELECT c.id, COALESCE(i.external_key,e.external_key) AS external_key, c.account_display_id, c.credential_custody, \
+             CASE WHEN c.authorization_state='authorized' AND \
+                 (c.expires_at<=now() OR (c.remote_extension_id IS NOT NULL AND \
+                  (cred.extension_id IS NULL OR cred.expires_at<=now()))) \
+                 THEN 'expired' ELSE c.authorization_state END AS authorization_state, \
+             c.authorized_capabilities, LEAST(c.expires_at,cred.expires_at) AS expires_at, c.failure_code \
              FROM external_connections c LEFT JOIN integration_definitions i ON i.id=c.integration_id \
              LEFT JOIN remote_extensions e ON e.id=c.remote_extension_id \
+             LEFT JOIN remote_extension_credentials cred ON cred.extension_id=c.remote_extension_id \
              WHERE c.user_context_id=$1 ORDER BY c.created_at DESC, c.id DESC LIMIT 100",
         )
         .bind(context.id.0)
@@ -82,10 +87,15 @@ impl ConnectionService {
         connection_id: Uuid,
     ) -> Result<Connection, ConnectionError> {
         let row = sqlx::query(
-            "SELECT c.id, COALESCE(i.external_key,e.external_key) AS external_key, c.account_display_id, c.credential_custody, c.authorization_state, \
-             c.authorized_capabilities, c.expires_at, c.failure_code \
+            "SELECT c.id, COALESCE(i.external_key,e.external_key) AS external_key, c.account_display_id, c.credential_custody, \
+             CASE WHEN c.authorization_state='authorized' AND \
+                 (c.expires_at<=now() OR (c.remote_extension_id IS NOT NULL AND \
+                  (cred.extension_id IS NULL OR cred.expires_at<=now()))) \
+                 THEN 'expired' ELSE c.authorization_state END AS authorization_state, \
+             c.authorized_capabilities, LEAST(c.expires_at,cred.expires_at) AS expires_at, c.failure_code \
              FROM external_connections c LEFT JOIN integration_definitions i ON i.id=c.integration_id \
              LEFT JOIN remote_extensions e ON e.id=c.remote_extension_id \
+             LEFT JOIN remote_extension_credentials cred ON cred.extension_id=c.remote_extension_id \
              WHERE c.id=$1 AND c.user_context_id=$2",
         )
         .bind(connection_id)
