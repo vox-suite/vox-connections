@@ -1,5 +1,6 @@
 //! Run against a disposable database after applying the matching connector schema.
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use vox_connections::{
     capability_grants::{CapabilityGrantService, CreateGrantRequest},
@@ -14,6 +15,25 @@ use vox_connections::{
     },
     skills::{PublishSkillRequest, SkillService},
 };
+
+fn reviewed_package(
+    manifest: &InstallExtensionRequest,
+    metadata: &vox_connections::packages::PackageMetadata,
+    read_effects_verified: bool,
+) -> serde_json::Value {
+    let digest = hex::encode(Sha256::digest(
+        vox_connections::packages::package_bytes(manifest, metadata).expect("package bytes"),
+    ));
+    json!({
+        "schema_version": 1,
+        "package_digest": digest,
+        "protocol_version": metadata.protocol_version,
+        "live_inventory_verified": true,
+        "behavior_certified": true,
+        "read_effects_verified": read_effects_verified,
+        "evidence": {"reviewer": "test-operator", "report_digest": "f".repeat(64)}
+    })
+}
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL and the matching database schema"]
@@ -115,12 +135,13 @@ async fn independently_registered_host_can_install_skill_and_extension() {
     let manifest: InstallExtensionRequest =
         serde_json::from_str(include_str!("../examples/mcp/read-only-manifest.json"))
             .expect("package manifest");
+    let package_metadata = vox_connections::packages::PackageMetadata::oauth();
     let package_request = vox_connections::packages::PublishPackage {
-        metadata: vox_connections::packages::PackageMetadata::oauth(),
+        metadata: package_metadata.clone(),
         deployment_id,
         version: 1,
         manifest: manifest.clone(),
-        review: json!({"read_effects_verified":true,"evidence":{"reviewer":"test-operator"}}),
+        review: reviewed_package(&manifest, &package_metadata, true),
     };
     let package = packages
         .publish(package_request.clone())
@@ -132,6 +153,7 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         .expect("same immutable package is idempotent");
     let mut changed = package_request;
     changed.manifest.endpoint_url = "https://different.example/mcp".into();
+    changed.review = reviewed_package(&changed.manifest, &changed.metadata, true);
     assert!(matches!(
         packages.publish(changed).await,
         Err(vox_connections::packages::PackageError::Conflict)
@@ -229,8 +251,8 @@ async fn independently_registered_host_can_install_skill_and_extension() {
                 deployment_id,
                 version: 1,
                 manifest: bundled_manifest.clone(),
-                metadata,
-                review: json!({"reviewer":"test-operator"}),
+                metadata: metadata.clone(),
+                review: reviewed_package(&bundled_manifest, &metadata, true),
             })
             .await
             .expect("publish bundle package");
@@ -468,14 +490,15 @@ async fn independently_registered_host_can_install_skill_and_extension() {
         capability.effect = ExtensionEffect::Write;
         capability.consequential = true;
     }
+    let write_metadata = vox_connections::packages::PackageMetadata::oauth();
     let write_package = packages
         .publish(vox_connections::packages::PublishPackage {
-            metadata: vox_connections::packages::PackageMetadata::oauth(),
+            metadata: write_metadata.clone(),
             deployment_id,
             version: 1,
             manifest: write_manifest.clone(),
             // Even this read-attestation must never activate a consequential package.
-            review: json!({"read_effects_verified":true,"evidence":{"reviewer":"test-operator"}}),
+            review: reviewed_package(&write_manifest, &write_metadata, true),
         })
         .await
         .expect("publish write package");
