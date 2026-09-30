@@ -904,7 +904,7 @@ impl ConnectedAppsService {
                             && tool.get("inputSchema") == Some(&cap.input_schema)
                     })
                 }) {
-                    tools.push(json!({"connection_id":connection_id,"name":cap.external_key,"description":cap.display_name,"input_schema":cap.input_schema,"effect":cap.effect,"approval_required":cap.consequential,"data_recipients":cap.data_recipients}));
+                    tools.push(json!({"connection_id":connection_id,"name":cap.external_key,"description":cap.display_name,"input_schema":cap.input_schema,"effect":cap.effect,"approval_required":cap.consequential || cap.effect.is_consequential(),"data_recipients":cap.data_recipients}));
                 }
             }
         }
@@ -990,7 +990,7 @@ impl ConnectedAppsService {
                    JOIN deployment_agent_selections s ON s.agent_definition_id=a.id \
                    WHERE g.connection_id=x.id AND g.user_context_id=x.user_context_id \
                      AND g.capability_external_key=$3 AND g.state='enabled' \
-                     AND a.external_key=$4 AND a.deployment_id=$5 AND a.state='enabled' \
+                     AND a.external_key=$4 AND a.deployment_id=$5 AND a.state='enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled')) AND a.owner_user_context_id=x.user_context_id \
                      AND ($3=ANY(a.requested_capability_categories) \
                           OR '*'=ANY(a.requested_capability_categories))) \
              FOR SHARE OF x,e",

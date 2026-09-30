@@ -17,9 +17,11 @@ CREATE TABLE public.agent_definitions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     deployment_id uuid NOT NULL REFERENCES public.platform_deployments(id),
     external_key text NOT NULL,
+    template_id uuid REFERENCES public.agent_definitions(id),
+    owner_user_context_id uuid NOT NULL REFERENCES public.user_contexts(id),
     state text NOT NULL DEFAULT 'enabled',
     requested_capability_categories text[] NOT NULL DEFAULT '{}',
-    UNIQUE (deployment_id, external_key)
+    UNIQUE (owner_user_context_id, external_key)
 );
 CREATE TABLE public.deployment_agent_selections (
     deployment_id uuid NOT NULL REFERENCES public.platform_deployments(id),

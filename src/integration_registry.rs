@@ -284,10 +284,11 @@ impl IntegrationRegistry {
                 "SELECT a.requested_capability_categories FROM agent_definitions a \
                  JOIN deployment_agent_selections s ON s.agent_definition_id=a.id \
                  AND s.deployment_id=a.deployment_id \
-                 WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled'",
+                 WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled' AND a.owner_user_context_id=$3",
             )
             .bind(context.subject.deployment_id.0)
             .bind(key)
+            .bind(context.id.0)
             .fetch_optional(&self.db)
             .await?
             .ok_or(IntegrationRegistryError::NotFound)?;

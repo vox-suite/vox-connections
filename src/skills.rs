@@ -371,7 +371,7 @@ impl SkillService {
         .execute(&mut *tx)
         .await?;
         if let Some(key) = agent_key {
-            let agent: Uuid=sqlx::query_scalar("SELECT a.id FROM agent_definitions a JOIN deployment_agent_selections s ON s.agent_definition_id=a.id WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled'").bind(context.request_context().subject.deployment_id.0).bind(key).fetch_optional(&mut *tx).await?.ok_or(SkillError::NotFound)?;
+            let agent: Uuid=sqlx::query_scalar("SELECT a.id FROM agent_definitions a JOIN deployment_agent_selections s ON s.agent_definition_id=a.id WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled')) AND a.owner_user_context_id=$3").bind(context.request_context().subject.deployment_id.0).bind(key).bind(context.request_context().id.0).fetch_optional(&mut *tx).await?.ok_or(SkillError::NotFound)?;
             sqlx::query("INSERT INTO skill_agent_enablements(user_context_id,skill_id,agent_definition_id,enabled) VALUES ($1,$2,$3,true) ON CONFLICT(user_context_id,skill_id,agent_definition_id) DO UPDATE SET enabled=true,updated_at=now()").bind(context.request_context().id.0).bind(skill_id).bind(agent).execute(&mut *tx).await?;
         }
         tx.commit().await?;
@@ -448,10 +448,11 @@ impl SkillService {
         let selected: Option<Uuid> = sqlx::query_scalar(
             "SELECT a.id FROM agent_definitions a
              JOIN deployment_agent_selections sel ON sel.agent_definition_id=a.id
-             WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled'",
+             WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled')) AND a.owner_user_context_id=$3",
         )
         .bind(context.request_context().subject.deployment_id.0)
         .bind(agent_key)
+        .bind(context.request_context().id.0)
         .fetch_optional(&self.db)
         .await?;
         selected.ok_or(SkillError::NotFound)

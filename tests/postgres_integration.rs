@@ -640,19 +640,21 @@ async fn independently_registered_host_can_install_skill_and_extension() {
     };
     let agent_id = if core_host_schema {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO agent_definitions (deployment_id,external_key,purpose,requested_capability_categories) \
-             VALUES ($1,'general','General purpose agent',ARRAY['*']) RETURNING id",
+            "INSERT INTO agent_definitions (deployment_id,external_key,purpose,requested_capability_categories,owner_user_context_id) \
+             VALUES ($1,'general','General purpose agent',ARRAY['*'],$2) RETURNING id",
         )
         .bind(deployment_id)
+        .bind(context.id.0)
         .fetch_one(&pool)
         .await
         .expect("agent")
     } else {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO agent_definitions (deployment_id,external_key,requested_capability_categories) \
-             VALUES ($1,'general',ARRAY['*']) RETURNING id",
+            "INSERT INTO agent_definitions (deployment_id,external_key,requested_capability_categories,owner_user_context_id) \
+             VALUES ($1,'general',ARRAY['*'],$2) RETURNING id",
         )
         .bind(deployment_id)
+        .bind(context.id.0)
         .fetch_one(&pool)
         .await
         .expect("agent")
