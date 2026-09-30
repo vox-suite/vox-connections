@@ -990,7 +990,7 @@ impl ConnectedAppsService {
                    JOIN deployment_agent_selections s ON s.agent_definition_id=a.id \
                    WHERE g.connection_id=x.id AND g.user_context_id=x.user_context_id \
                      AND g.capability_external_key=$3 AND g.state='enabled' \
-                     AND a.external_key=$4 AND a.deployment_id=$5 AND a.state='enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled')) AND a.owner_user_context_id=x.user_context_id \
+                     AND a.external_key=$4 AND a.deployment_id=$5 AND a.state='enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled' AND ($3=ANY(template.requested_capability_categories) OR '*'=ANY(template.requested_capability_categories)))) AND a.owner_user_context_id=x.user_context_id \
                      AND ($3=ANY(a.requested_capability_categories) \
                           OR '*'=ANY(a.requested_capability_categories))) \
              FOR SHARE OF x,e",

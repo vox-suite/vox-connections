@@ -61,8 +61,8 @@ impl CapabilityGrantService {
         .ok_or(CapabilityGrantError::Unavailable)?;
         let agent_id: Uuid = row.try_get("id")?;
         let declared_for_agent = sqlx::query_scalar::<_, bool>(
-            "SELECT ($3 = ANY(requested_capability_categories) OR '*' = ANY(requested_capability_categories)) FROM agent_definitions \
-             WHERE id = $1 AND deployment_id = $2",
+            "SELECT ($3 = ANY(a.requested_capability_categories) OR '*' = ANY(a.requested_capability_categories)) AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions t WHERE t.id=a.template_id AND t.state='enabled' AND ($3=ANY(t.requested_capability_categories) OR '*'=ANY(t.requested_capability_categories)))) FROM agent_definitions a \
+             WHERE a.id = $1 AND a.deployment_id = $2",
         )
         .bind(agent_id)
         .bind(context.subject.deployment_id.0)
@@ -138,7 +138,7 @@ impl CapabilityGrantService {
              JOIN deployment_agent_selections s ON s.agent_definition_id = a.id \
              JOIN external_connections x ON x.id = g.connection_id \
              WHERE g.user_context_id = $1 AND a.deployment_id = $2 AND a.external_key = $3 \
-             AND a.state = 'enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled')) AND a.owner_user_context_id = $1 AND g.state = 'enabled' \
+             AND a.state = 'enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled' AND (g.capability_external_key=ANY(template.requested_capability_categories) OR '*'=ANY(template.requested_capability_categories)))) AND a.owner_user_context_id = $1 AND g.state = 'enabled' \
              AND x.user_context_id = $1 AND x.authorization_state = 'authorized' \
              AND (x.expires_at IS NULL OR x.expires_at > now()) \
              AND (g.capability_external_key = ANY(a.requested_capability_categories) \
