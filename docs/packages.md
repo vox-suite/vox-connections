@@ -54,4 +54,11 @@ Setup expires after 20 minutes. Package withdrawal, changed assistant instructio
 
 The lower-level install/authorize/connect-public routes remain useful for independently added MCP servers and hosts that manage each explicit step. Installation alone carries no agent authority. MCP tool dispatch rechecks current package, connection, declared schema, reported schema, and grant. Consequential dispatch additionally requires the authenticated exact approval and a durable execution. A provider response alone is an unknown outcome until independently verified.
 
-For isolated database verification apply `examples/independent_host_schema.sql`, `schema/connectors.sql`, `schema/packages.sql`, `schema/skill-content.sql`, and `schema/public-mcp.sql`, and `schema/setup.sql` in that order, then run `TEST_DATABASE_URL=postgres://... cargo test --test postgres_integration -- --ignored` and `cargo test --test setup_integration -- --ignored`.
+For isolated database verification apply `examples/independent_host_schema.sql`, `schema/connectors.sql`, `schema/packages.sql`, `schema/skill-content.sql`, `schema/public-mcp.sql`, `schema/setup.sql`, and `schema/discovery.sql` in that order, then run `TEST_DATABASE_URL=postgres://... cargo test --test postgres_integration -- --ignored` and `cargo test --test setup_integration -- --ignored`.
+
+
+## Dynamic discovery
+
+`CapabilityDiscovery::search(scope, agent, query, offset)` searches PostgreSQL GIN indexes over compact reviewed tool metadata and immutable skill-version metadata. It returns at most ten current permitted results and a next offset; it never contacts a provider or returns schemas, credentials or instruction bodies. Package publication/withdrawal, current owned-agent/template policy, grants, observed schema matching and pinned skill enablement are checked at query time. An expiring account with a refresh token may appear as `requires_refresh`; discovery is not proof that refresh or execution will succeed.
+
+The index derives from the existing manifest and skill versions; connector authors add no new registration file or provider-specific code. `ConnectedAppsService::tool_for_agent` checks the exact grant before refreshing only that connection, then loads the single reviewed schema with current authority checks. The full inventory route remains available for host account management. Core's model-facing library uses indexed search and targeted loading/proposals. Large-installation latency and retrieval quality still require retained benchmark evidence.

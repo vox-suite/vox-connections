@@ -135,6 +135,77 @@ async fn setup_is_atomic_scoped_and_callback_recovery_does_not_regrant() {
         .await
         .unwrap();
     assert_eq!(first.state, SetupState::Complete);
+    let loaded = apps
+        .tool_for_agent(&scope, "general", connection, "echo.read")
+        .await
+        .unwrap();
+    assert_eq!(loaded["name"], "echo.read");
+    assert!(
+        apps.tool_for_agent(&foreign, "general", connection, "echo.read")
+            .await
+            .is_err()
+    );
+    let discovery = vox_connections::discovery::CapabilityDiscovery::new(pool.clone());
+    let results = discovery
+        .search(&scope, "general", "echo guidance", 0)
+        .await
+        .unwrap();
+    assert_eq!(results["results"].as_array().unwrap().len(), 2);
+    assert!(!results.to_string().contains("input_schema"));
+    assert!(!results.to_string().contains("instructions"));
+    assert!(
+        discovery
+            .search(&foreign, "general", "echo guidance", 0)
+            .await
+            .unwrap()["results"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    for index in 0..14 {
+        let paging = skills
+            .publish_curated(
+                &deployment_key,
+                PublishSkillRequest {
+                    external_key: format!("paging-fixture-{index:02}"),
+                    title: format!("Paging fixture {index:02}"),
+                    summary: "Pagination metadata".into(),
+                    instructions: "Never include this full body in discovery.".into(),
+                    requested_capabilities: vec![],
+                    resources: json!({}),
+                },
+            )
+            .await
+            .unwrap();
+        skills
+            .install_for_agent(&scope, paging, 1, Some("general"))
+            .await
+            .unwrap();
+    }
+    let page = discovery
+        .search(&scope, "general", "paging", 0)
+        .await
+        .unwrap();
+    assert_eq!(page["results"].as_array().unwrap().len(), 10);
+    assert_eq!(page["next_offset"], 10);
+    assert!(!page.to_string().contains("full body"));
+    let next = discovery
+        .search(&scope, "general", "paging", 10)
+        .await
+        .unwrap();
+    assert_eq!(next["results"].as_array().unwrap().len(), 4);
+    assert!(next["next_offset"].is_null());
+    assert_ne!(
+        page["results"][9]["skill_id"],
+        next["results"][0]["skill_id"]
+    );
+    assert!(discovery.search(&scope, "general", "", 0).await.is_err());
+    assert!(
+        discovery
+            .search(&scope, "general", "paging", 10_001)
+            .await
+            .is_err()
+    );
     let enabled: bool = sqlx::query_scalar("SELECT enabled FROM skill_agent_enablements WHERE user_context_id=$1 AND skill_id=$2 AND agent_definition_id=$3").bind(context).bind(skill).bind(agent).fetch_one(&pool).await.unwrap();
     assert!(enabled);
     let grants = CapabilityGrantService::new(pool.clone());
@@ -218,6 +289,16 @@ async fn setup_is_atomic_scoped_and_callback_recovery_does_not_regrant() {
             .await
             .unwrap()
             .is_empty()
+    );
+    let results = discovery
+        .search(&scope, "general", "echo", 0)
+        .await
+        .unwrap();
+    assert!(results["results"].as_array().unwrap().is_empty());
+    assert!(
+        apps.tool_for_agent(&scope, "general", connection, "echo.read")
+            .await
+            .is_err()
     );
     // A revoked grant cannot be resurrected by a still-pending OAuth tab.
     sqlx::query("UPDATE connector_setups SET state='pending',completed_at=NULL WHERE id=$1")
