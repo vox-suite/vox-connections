@@ -12,3 +12,4 @@ pub mod skill_format;
 pub mod skills;
 
 pub mod defaults;
+pub mod discovery;

@@ -887,12 +887,60 @@ impl ConnectedAppsService {
         agent: &str,
     ) -> Result<Vec<Value>, ConnectedAppError> {
         self.refresh_due(context).await?;
-        let effective = crate::capability_grants::CapabilityGrantService::new(self.db.clone())
-            .effective_for_agent(&context.request_context(), agent)
+        self.tools_for_agent_filtered(context, agent, None, None)
             .await
-            .map_err(|_| ConnectedAppError::GrantRequired)?;
-        let rows: Vec<(Uuid,Uuid,Value,Value)>=sqlx::query_as("SELECT x.id,e.id,c.tools,v.capabilities FROM external_connections x JOIN remote_extensions e ON e.id=x.remote_extension_id JOIN remote_extension_credentials c ON c.extension_id=e.id JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version WHERE x.user_context_id=$1 AND x.authorization_state='authorized' AND (x.expires_at IS NULL OR x.expires_at>now()) AND (c.expires_at IS NULL OR c.expires_at>now()) AND e.lifecycle_state='active' AND e.consent_status='consented' AND e.operator_enabled AND e.conformance_status='passed' ORDER BY x.id LIMIT 101")
-            .bind(context.request_context().id.0).fetch_all(&self.db).await?;
+    }
+
+    /// Load exactly one granted schema and refresh only its account. An
+    /// unauthorized lookup cannot trigger provider traffic.
+    pub async fn tool_for_agent(
+        &self,
+        context: &impl RequestScope,
+        agent: &str,
+        connection: Uuid,
+        name: &str,
+    ) -> Result<Value, ConnectedAppError> {
+        let grants = crate::capability_grants::CapabilityGrantService::new(self.db.clone());
+        if grants
+            .effective_for_tool(&context.request_context(), agent, connection, name)
+            .await
+            .map_err(|_| ConnectedAppError::GrantRequired)?
+            .is_none()
+        {
+            return Err(ConnectedAppError::GrantRequired);
+        }
+        if let Err(error) = self.refresh_one(context, connection).await {
+            tracing::warn!(%connection,%error,"connected app token refresh failed before schema load");
+        }
+        self.tools_for_agent_filtered(context, agent, Some(connection), Some(name))
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(ConnectedAppError::GrantRequired)
+    }
+
+    async fn tools_for_agent_filtered(
+        &self,
+        context: &impl RequestScope,
+        agent: &str,
+        connection: Option<Uuid>,
+        name: Option<&str>,
+    ) -> Result<Vec<Value>, ConnectedAppError> {
+        let grants = crate::capability_grants::CapabilityGrantService::new(self.db.clone());
+        let effective = match (connection, name) {
+            (Some(connection), Some(name)) => grants
+                .effective_for_tool(&context.request_context(), agent, connection, name)
+                .await
+                .map_err(|_| ConnectedAppError::GrantRequired)?
+                .into_iter()
+                .collect(),
+            _ => grants
+                .effective_for_agent(&context.request_context(), agent)
+                .await
+                .map_err(|_| ConnectedAppError::GrantRequired)?,
+        };
+        let rows: Vec<(Uuid,Uuid,Value,Value)>=sqlx::query_as("SELECT x.id,e.id,CASE WHEN $3::text IS NULL THEN c.tools ELSE COALESCE((SELECT jsonb_agg(tool) FROM jsonb_array_elements(c.tools) tool WHERE tool->>'name'=$3),'[]'::jsonb) END,CASE WHEN $3::text IS NULL THEN v.capabilities ELSE COALESCE((SELECT jsonb_agg(cap) FROM jsonb_array_elements(v.capabilities) cap WHERE cap->>'external_key'=$3),'[]'::jsonb) END FROM external_connections x JOIN remote_extensions e ON e.id=x.remote_extension_id JOIN remote_extension_credentials c ON c.extension_id=e.id JOIN remote_extension_versions v ON v.extension_id=e.id AND v.version=e.current_version WHERE x.user_context_id=$1 AND ($2::uuid IS NULL OR x.id=$2) AND x.authorization_state='authorized' AND (x.expires_at IS NULL OR x.expires_at>now()) AND (c.expires_at IS NULL OR c.expires_at>now()) AND e.lifecycle_state='active' AND e.consent_status='consented' AND e.operator_enabled AND e.conformance_status='passed' AND v.conformance_status='passed' ORDER BY x.id LIMIT 101")
+            .bind(context.request_context().id.0).bind(connection).bind(name).fetch_all(&self.db).await?;
         if rows.len() > 100 {
             return Err(ConnectedAppError::Invalid);
         }

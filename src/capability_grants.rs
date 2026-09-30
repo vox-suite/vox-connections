@@ -130,6 +130,32 @@ impl CapabilityGrantService {
         context: &RequestContext,
         agent_external_key: &str,
     ) -> Result<Vec<CapabilityGrant>, CapabilityGrantError> {
+        self.effective(context, agent_external_key, None, None)
+            .await
+    }
+
+    pub async fn effective_for_tool(
+        &self,
+        context: &RequestContext,
+        agent: &str,
+        connection: Uuid,
+        capability: &str,
+    ) -> Result<Option<CapabilityGrant>, CapabilityGrantError> {
+        let capability = key(capability)?;
+        Ok(self
+            .effective(context, agent, Some(connection), Some(&capability))
+            .await?
+            .into_iter()
+            .next())
+    }
+
+    async fn effective(
+        &self,
+        context: &RequestContext,
+        agent_external_key: &str,
+        connection: Option<Uuid>,
+        capability: Option<&str>,
+    ) -> Result<Vec<CapabilityGrant>, CapabilityGrantError> {
         let agent_key = key(agent_external_key)?;
         let rows = sqlx::query(
             "SELECT g.id, a.external_key, g.connection_id, g.capability_external_key \
@@ -138,6 +164,7 @@ impl CapabilityGrantService {
              JOIN deployment_agent_selections s ON s.agent_definition_id = a.id \
              JOIN external_connections x ON x.id = g.connection_id \
              WHERE g.user_context_id = $1 AND a.deployment_id = $2 AND a.external_key = $3 \
+             AND ($4::uuid IS NULL OR g.connection_id=$4) AND ($5::text IS NULL OR g.capability_external_key=$5) \
              AND a.state = 'enabled' AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions template WHERE template.id=a.template_id AND template.state='enabled' AND (g.capability_external_key=ANY(template.requested_capability_categories) OR '*'=ANY(template.requested_capability_categories)))) AND a.owner_user_context_id = $1 AND g.state = 'enabled' \
              AND x.user_context_id = $1 AND x.authorization_state = 'authorized' \
              AND (x.expires_at IS NULL OR x.expires_at > now()) \
@@ -159,6 +186,8 @@ impl CapabilityGrantService {
         .bind(context.id.0)
         .bind(context.subject.deployment_id.0)
         .bind(agent_key)
+        .bind(connection)
+        .bind(capability)
         .fetch_all(&self.db)
         .await?;
         rows.into_iter()
