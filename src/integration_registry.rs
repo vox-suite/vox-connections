@@ -280,25 +280,34 @@ impl IntegrationRegistry {
         });
         if let Some(agent_external_key) = agent_external_key {
             let key = n(agent_external_key, 255).ok_or(IntegrationRegistryError::Invalid)?;
-            let requested = sqlx::query_scalar::<_, Vec<String>>(
-                "SELECT a.requested_capability_categories FROM agent_definitions a \
+            let policy = sqlx::query(
+                "SELECT a.requested_capability_categories, t.requested_capability_categories AS template_categories FROM agent_definitions a LEFT JOIN agent_definitions t ON t.id=a.template_id \
                  JOIN deployment_agent_selections s ON s.agent_definition_id=a.id \
                  AND s.deployment_id=a.deployment_id \
-                 WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled'",
+                 WHERE a.deployment_id=$1 AND a.external_key=$2 AND a.state='enabled' AND a.owner_user_context_id=$3 AND (a.template_id IS NULL OR EXISTS (SELECT 1 FROM agent_definitions t WHERE t.id=a.template_id AND t.state='enabled'))",
             )
             .bind(context.subject.deployment_id.0)
             .bind(key)
+            .bind(context.id.0)
             .fetch_optional(&self.db)
             .await?
             .ok_or(IntegrationRegistryError::NotFound)?;
+            let requested: Vec<String> = policy.try_get("requested_capability_categories")?;
+            let template: Option<Vec<String>> = policy.try_get("template_categories")?;
             capabilities.retain(|item| {
-                requested.iter().any(|category| {
-                    category
-                        == &format!(
-                            "{}.{}",
-                            item.integration_external_key, item.capability.external_key
-                        )
-                })
+                let key = format!(
+                    "{}.{}",
+                    item.integration_external_key, item.capability.external_key
+                );
+                let permits = |categories: &[String]| {
+                    categories
+                        .iter()
+                        .any(|category| category == "*" || category == &key)
+                };
+                permits(&requested)
+                    && template
+                        .as_ref()
+                        .is_none_or(|categories| permits(categories))
             });
         }
         Ok(capabilities)

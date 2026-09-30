@@ -640,19 +640,21 @@ async fn independently_registered_host_can_install_skill_and_extension() {
     };
     let agent_id = if core_host_schema {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO agent_definitions (deployment_id,external_key,purpose,requested_capability_categories) \
-             VALUES ($1,'general','General purpose agent',ARRAY['*']) RETURNING id",
+            "INSERT INTO agent_definitions (deployment_id,external_key,purpose,requested_capability_categories,owner_user_context_id) \
+             VALUES ($1,'general','General purpose agent',ARRAY['*'],$2) RETURNING id",
         )
         .bind(deployment_id)
+        .bind(context.id.0)
         .fetch_one(&pool)
         .await
         .expect("agent")
     } else {
         sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO agent_definitions (deployment_id,external_key,requested_capability_categories) \
-             VALUES ($1,'general',ARRAY['*']) RETURNING id",
+            "INSERT INTO agent_definitions (deployment_id,external_key,requested_capability_categories,owner_user_context_id) \
+             VALUES ($1,'general',ARRAY['*'],$2) RETURNING id",
         )
         .bind(deployment_id)
+        .bind(context.id.0)
         .fetch_one(&pool)
         .await
         .expect("agent")
@@ -693,6 +695,52 @@ async fn independently_registered_host_can_install_skill_and_extension() {
             .expect("other context grants")
             .is_empty()
     );
+    if core_host_schema {
+        let template: Uuid = sqlx::query_scalar("INSERT INTO agent_definitions(deployment_id,external_key,purpose,requested_capability_categories) VALUES($1,$2,'Fixture policy',ARRAY['*']) RETURNING id")
+            .bind(deployment_id).bind(format!("policy-{suffix}")).fetch_one(&pool).await.expect("template");
+        sqlx::query("UPDATE agent_definitions SET template_id=$2 WHERE id=$1")
+            .bind(agent_id)
+            .bind(template)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE agent_definitions SET requested_capability_categories=ARRAY['other.read'] WHERE id=$1").bind(template).execute(&pool).await.unwrap();
+        assert!(
+            grants
+                .effective_for_agent(&context, "general")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            grants
+                .grant(
+                    &context,
+                    CreateGrantRequest {
+                        agent_external_key: "general".into(),
+                        connection_id,
+                        capability_external_key: "weather.read".into(),
+                    }
+                )
+                .await
+                .is_err()
+        );
+        sqlx::query(
+            "UPDATE agent_definitions SET requested_capability_categories=ARRAY['*'] WHERE id=$1",
+        )
+        .bind(template)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            grants
+                .effective_for_agent(&context, "general")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
     let apps = ConnectedAppsService::from_options(pool.clone(), ConnectedAppsOptions::default());
     assert_eq!(
         apps.connections(&context)
