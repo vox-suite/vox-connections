@@ -45,4 +45,6 @@ jobs:
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema/packages.sql
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema/skill-content.sql
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema/public-mcp.sql
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f schema/setup.sql
           cargo test --test postgres_integration -- --ignored
+          cargo test --test setup_integration -- --ignored

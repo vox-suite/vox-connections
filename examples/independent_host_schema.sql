@@ -20,6 +20,7 @@ CREATE TABLE public.agent_definitions (
     template_id uuid REFERENCES public.agent_definitions(id),
     owner_user_context_id uuid NOT NULL REFERENCES public.user_contexts(id),
     state text NOT NULL DEFAULT 'enabled',
+    instruction_version integer NOT NULL DEFAULT 1,
     requested_capability_categories text[] NOT NULL DEFAULT '{}',
     UNIQUE (owner_user_context_id, external_key)
 );

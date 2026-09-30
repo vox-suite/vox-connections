@@ -77,6 +77,8 @@ pub enum ConnectedAppError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AuthorizationStart {
+    #[serde(skip)]
+    pub authorization_session_id: Uuid,
     pub authorization_url: String,
     pub expires_at: DateTime<Utc>,
 }
@@ -329,6 +331,7 @@ impl ConnectedAppsService {
             }
         }
         Ok(AuthorizationStart {
+            authorization_session_id: session_id,
             authorization_url: url.to_string(),
             expires_at,
         })
@@ -705,6 +708,12 @@ impl ConnectedAppsService {
         .bind(authorized)
         .execute(&mut *tx)
         .await?;
+        // Recovery can distinguish a consumed code from a verified account.
+        // This evidence commits with credentials and account authorization.
+        sqlx::query("UPDATE mcp_authorization_sessions SET completed_at=now() WHERE id=$1")
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
