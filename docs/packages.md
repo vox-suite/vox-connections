@@ -32,6 +32,26 @@ The deployment operator independently reviews provider behavior and records `rev
 
 These fields are an operator attestation; Vox cannot infer real-world effects from MCP annotations or a self-reported tool result. Do not set a passing flag without the corresponding independent report and live evidence. With `VOX_OPERATOR_TOKEN` in the environment, `cargo run --bin vox -- package publish ./my-integration https://core.example <deployment-uuid>` publishes an immutable version through Core's operator route. Publication rejects changed bytes for an existing version and preserves withdrawals. Bundled skill references must already identify published curated, active skill versions with matching digests; publish those through the operator skill route before the package. Material package version changes conflict with existing installations until an explicit update/reconsent/reconnect journey clears old authority.
 
-A host lists `POST /v1/connector-packages/list`, installs the selected version/digest with `POST /v1/connector-packages/install`, then follows the declared auth mode: public MCP uses `connect-public`, OAuth uses a signed authorization callback. The user grants selected capabilities to a selected agent. MCP tool dispatch rechecks current package, connection, declared schema, reported schema, and grant. Consequential dispatch additionally requires the authenticated exact approval and a durable execution. A provider response alone is an unknown outcome until independently verified.
+A host lists `POST /v1/connector-packages/list` and presents the exact version/digest, assistant, capabilities and pinned guidance for consent. It sends one signed `POST /v1/connector-packages/setup` request:
 
-For isolated database verification apply `examples/independent_host_schema.sql`, `schema/connectors.sql`, `schema/packages.sql`, `schema/skill-content.sql`, and `schema/public-mcp.sql` in that order, then run `TEST_DATABASE_URL=postgres://... cargo test --test postgres_integration -- --ignored`.
+```json
+{
+  "host_context": {"host_user_id": "<authenticated host user>", "organization_external_key": null},
+  "setup": {
+    "external_key": "<reviewed package key>", "version": 1, "digest": "<reviewed digest>",
+    "redirect_uri": "<registered host callback>",
+    "consent": {
+      "agent_external_key": "<owned assistant key>", "agent_instruction_version": 1,
+      "capability_external_keys": ["<chosen reviewed tool>"], "enable_bundled_skills": true
+    }
+  }
+}
+```
+
+Use `consent: null` for an account-only installation. Personal Assistant may be visibly preselected, but the host must present the choices before the user confirms. Consequential capabilities must not be silently preselected. The reply has `setup_id`, `extension_id`, `external_key`, `state`, and optional `authorization_url`. `authorize` means navigate to the provider. The authenticated callback sends state/code/optional issuer to `POST /v1/connector-packages/setup/callback`; the server binds it to the durable consent. `complete` records that this setup was applied, not a permanent promise of current access. `needs_review` preserves the linked account and applies no new authority; start a fresh setup after reviewing the changed state. Manual MCP authorization without package consent returns `account_linked` and a null setup ID; no assistant access is inferred.
+
+Setup expires after 20 minutes. Package withdrawal, changed assistant instruction version, changed declared/observed schema, revoked grants, disabled guidance and unavailable policy invalidate pending enablement. All chosen grants and guidance enablements commit together. A verified OAuth-session marker commits with account credentials; callback retry can recover after a crash without reusing the provider code. Retrying a completed setup never restores subsequently revoked access. Sign-in cancellation grants nothing. If a process dies after consuming a code but before verified credentials commit, start provider sign-in again; a consumed code is not proof of connectivity.
+
+The lower-level install/authorize/connect-public routes remain useful for independently added MCP servers and hosts that manage each explicit step. Installation alone carries no agent authority. MCP tool dispatch rechecks current package, connection, declared schema, reported schema, and grant. Consequential dispatch additionally requires the authenticated exact approval and a durable execution. A provider response alone is an unknown outcome until independently verified.
+
+For isolated database verification apply `examples/independent_host_schema.sql`, `schema/connectors.sql`, `schema/packages.sql`, `schema/skill-content.sql`, and `schema/public-mcp.sql`, and `schema/setup.sql` in that order, then run `TEST_DATABASE_URL=postgres://... cargo test --test postgres_integration -- --ignored` and `cargo test --test setup_integration -- --ignored`.
