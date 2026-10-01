@@ -1,9 +1,7 @@
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::info;
-use vox_connections::service::{
-    build_service_router, HmacVerifier, ServiceConfig, ServiceState,
-};
+use vox_connections::service::{HmacVerifier, ServiceConfig, ServiceState, build_service_router};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,7 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = build_service_router(state);
 
     let listener = TcpListener::bind(&config.bind_address).await?;
-    info!("Vox Connections Service listening on {}", config.bind_address);
+    info!(
+        "Vox Connections Service listening on {}",
+        config.bind_address
+    );
 
     axum::serve(listener, router).await?;
 
