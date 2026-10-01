@@ -2,6 +2,7 @@ pub mod capability_grants;
 pub mod conformance;
 pub mod connected_apps;
 pub mod connections;
+pub mod google_reads;
 pub mod identity;
 pub mod integration_registry;
 pub mod packages;

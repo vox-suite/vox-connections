@@ -37,3 +37,7 @@ path = "src/bin/server.rs"
 [[bin]]
 name = "vox"
 path = "src/bin/vox.rs"
+
+[[bin]]
+name = "vox-google-read-mcp"
+path = "src/bin/google_read_mcp.rs"
