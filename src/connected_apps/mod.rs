@@ -1118,6 +1118,7 @@ impl ConnectedAppsService {
                 mcp::ToolCall {
                     name: tool_name,
                     expected_protocol: expected_protocol.as_deref(),
+                    reviewed_schema: &cap.input_schema,
                     arguments,
                 },
                 CONNECT_TIMEOUT,
