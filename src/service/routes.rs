@@ -1,13 +1,13 @@
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     middleware,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
@@ -17,10 +17,7 @@ use crate::{
     integration_registry::{RegisterIntegrationRequest, SetIntegrationEnabledRequest},
     packages::{PackageError, PublishPackage},
     remote_extensions::{InstallExtensionRequest, RemoteExtensionError, UpdateExtensionRequest},
-    service::{
-        auth::hmac_auth_middleware,
-        state::ServiceState,
-    },
+    service::{auth::hmac_auth_middleware, state::ServiceState},
     setup::{SetupError, SetupRequest},
     skills::{PublishSkillRequest, SkillError},
 };
@@ -208,7 +205,11 @@ async fn list_connections(
     match svc.list(&r.context).await {
         Ok(records) => (StatusCode::OK, Json(records)).into_response(),
         Err(ConnectionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -224,7 +225,11 @@ async fn disconnect_connection(
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(ConnectionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(ConnectionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -270,7 +275,11 @@ async fn effective_grants(
     match svc.effective_for_agent(&r.context, &agent_key).await {
         Ok(grants) => (StatusCode::OK, Json(grants)).into_response(),
         Err(CapabilityGrantError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -344,7 +353,11 @@ async fn publish_package(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(PackageError::Conflict) => StatusCode::CONFLICT.into_response(),
         Err(PackageError::Unavailable) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -357,7 +370,11 @@ async fn list_packages(
     };
     match svc.list(&r.context).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -368,11 +385,18 @@ async fn install_package(
     let Some(svc) = state.packages.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.install(&r.context, &r.external_key, r.version, &r.digest).await {
+    match svc
+        .install(&r.context, &r.external_key, r.version, &r.digest)
+        .await
+    {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(PackageError::Conflict) => StatusCode::CONFLICT.into_response(),
         Err(PackageError::Unavailable) => StatusCode::NOT_FOUND.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -383,18 +407,22 @@ async fn withdraw_package(
     let Some(svc) = state.packages.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.withdraw(r.deployment_id, &r.external_key, r.version).await {
+    match svc
+        .withdraw(r.deployment_id, &r.external_key, r.version)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(PackageError::Unavailable) => StatusCode::NOT_FOUND.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
 // Setup
-async fn setup_start(
-    State(state): State<ServiceState>,
-    Json(r): Json<SetupStartBody>,
-) -> Response {
+async fn setup_start(State(state): State<ServiceState>, Json(r): Json<SetupStartBody>) -> Response {
     let (Some(svc), Some(apps)) = (state.setup.as_ref(), state.connected_apps.as_ref()) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
@@ -402,7 +430,11 @@ async fn setup_start(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(SetupError::Unavailable) => StatusCode::NOT_FOUND.into_response(),
         Err(SetupError::ReviewRequired) => StatusCode::CONFLICT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -413,11 +445,18 @@ async fn setup_callback(
     let (Some(svc), Some(apps)) = (state.setup.as_ref(), state.connected_apps.as_ref()) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.complete(&r.context, apps, &r.state, &r.code, r.iss.as_deref()).await {
+    match svc
+        .complete(&r.context, apps, &r.state, &r.code, r.iss.as_deref())
+        .await
+    {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(SetupError::Unavailable) => StatusCode::NOT_FOUND.into_response(),
         Err(SetupError::ReviewRequired) => StatusCode::CONFLICT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -432,7 +471,11 @@ async fn install_extension(
     match svc.install(&r.context, r.request).await {
         Ok(v) => (StatusCode::CREATED, Json(v)).into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -446,7 +489,11 @@ async fn list_extensions(
     match svc.list(&r.context).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -462,7 +509,11 @@ async fn get_extension(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -478,7 +529,11 @@ async fn update_extension(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -494,7 +549,11 @@ async fn remove_extension(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -510,7 +569,11 @@ async fn set_extension_enabled(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -522,11 +585,18 @@ async fn record_extension_conformance(
     let Some(svc) = state.extensions.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.record_conformance(&r.context, id, r.version, r.passed, r.report).await {
+    match svc
+        .record_conformance(&r.context, id, r.version, r.passed, r.report)
+        .await
+    {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -542,7 +612,11 @@ async fn renew_extension_consent(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -558,7 +632,11 @@ async fn quarantine_extension(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(RemoteExtensionError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(RemoteExtensionError::Database(_)) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -573,7 +651,11 @@ async fn authorize_app(
     };
     match svc.begin(&r.context, id, &r.host_callback_url).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -584,16 +666,20 @@ async fn app_callback(
     let Some(svc) = state.connected_apps.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.complete_with_issuer(&r.context, &r.state, &r.code, r.iss.as_deref()).await {
+    match svc
+        .complete_with_issuer(&r.context, &r.state, &r.code, r.iss.as_deref())
+        .await
+    {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
-async fn app_status(
-    State(state): State<ServiceState>,
-    Json(r): Json<ContextRequest>,
-) -> Response {
+async fn app_status(State(state): State<ServiceState>, Json(r): Json<ContextRequest>) -> Response {
     let Some(svc) = state.connected_apps.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
@@ -606,7 +692,11 @@ async fn app_status(
             })),
         )
             .into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -620,45 +710,57 @@ async fn connect_public_app(
     };
     match svc.connect_public(&r.context, id).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
-async fn read_tool(
-    State(state): State<ServiceState>,
-    Json(r): Json<ToolCallBody>,
-) -> Response {
+async fn read_tool(State(state): State<ServiceState>, Json(r): Json<ToolCallBody>) -> Response {
     let Some(svc) = state.connected_apps.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.read_tool(
-        &r.context,
-        &r.agent_key,
-        r.extension_id,
-        &r.tool_name,
-        r.arguments,
-    ).await {
+    match svc
+        .read_tool(
+            &r.context,
+            &r.agent_key,
+            r.extension_id,
+            &r.tool_name,
+            r.arguments,
+        )
+        .await
+    {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
-async fn execute_tool(
-    State(state): State<ServiceState>,
-    Json(r): Json<ToolCallBody>,
-) -> Response {
+async fn execute_tool(State(state): State<ServiceState>, Json(r): Json<ToolCallBody>) -> Response {
     let Some(svc) = state.connected_apps.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.approved_tool(
-        &r.context,
-        &r.agent_key,
-        r.extension_id,
-        &r.tool_name,
-        r.arguments,
-    ).await {
+    match svc
+        .approved_tool(
+            &r.context,
+            &r.agent_key,
+            r.extension_id,
+            &r.tool_name,
+            r.arguments,
+        )
+        .await
+    {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -673,7 +775,11 @@ async fn publish_private_skill(
     match svc.publish_private(&r.context, r.request).await {
         Ok(v) => (StatusCode::CREATED, Json(v)).into_response(),
         Err(SkillError::Conflict) => StatusCode::CONFLICT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -684,23 +790,31 @@ async fn publish_curated_skill(
     let Some(svc) = state.skills.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.publish_curated(&r.deployment_external_key, r.request).await {
+    match svc
+        .publish_curated(&r.deployment_external_key, r.request)
+        .await
+    {
         Ok(v) => (StatusCode::CREATED, Json(v)).into_response(),
         Err(SkillError::Conflict) => StatusCode::CONFLICT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
-async fn list_skills(
-    State(state): State<ServiceState>,
-    Json(r): Json<ContextRequest>,
-) -> Response {
+async fn list_skills(State(state): State<ServiceState>, Json(r): Json<ContextRequest>) -> Response {
     let Some(svc) = state.skills.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     match svc.list(&r.context).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -715,7 +829,11 @@ async fn get_skill_version(
     match svc.version(&r.context, id, version).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(SkillError::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -731,7 +849,11 @@ async fn install_skill(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(SkillError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(SkillError::Conflict) => StatusCode::CONFLICT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -746,7 +868,11 @@ async fn disable_skill(
     match svc.disable(&r.context, id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(SkillError::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -760,7 +886,11 @@ async fn effective_skills(
     };
     match svc.effective(&r.context, &agent_key).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -775,7 +905,11 @@ async fn load_skill_for_agent(
     match svc.load_for_agent(&r.context, &agent_key, skill_id).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(SkillError::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -787,10 +921,17 @@ async fn set_skill_agent_enabled(
     let Some(svc) = state.skills.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match svc.set_agent_enabled(&r.context, &agent_key, skill_id, r.enabled).await {
+    match svc
+        .set_agent_enabled(&r.context, &agent_key, skill_id, r.enabled)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(SkillError::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -808,7 +949,10 @@ pub fn build_service_router(state: ServiceState) -> Router {
     let api_routes = Router::new()
         // Connections
         .route("/v1/connections/list", post(list_connections))
-        .route("/v1/connections/{id}/disconnect", post(disconnect_connection))
+        .route(
+            "/v1/connections/{id}/disconnect",
+            post(disconnect_connection),
+        )
         // Capability Grants
         .route("/v1/capability-grants", post(create_grant))
         .route("/v1/capability-grants/revoke", post(revoke_grant))
@@ -827,41 +971,74 @@ pub fn build_service_router(state: ServiceState) -> Router {
             "/v1/deployments/{external_key}/integrations/{integration_key}/versions",
             post(list_integration_versions),
         )
-        .route("/v1/capabilities/discover", post(discover_context_capabilities))
+        .route(
+            "/v1/capabilities/discover",
+            post(discover_context_capabilities),
+        )
         // Connector Packages
         .route("/v1/connector-packages/publish", post(publish_package))
         .route("/v1/connector-packages/list", post(list_packages))
         .route("/v1/connector-packages/install", post(install_package))
         .route("/v1/connector-packages/withdraw", post(withdraw_package))
         .route("/v1/connector-packages/setup", post(setup_start))
-        .route("/v1/connector-packages/setup/callback", post(setup_callback))
+        .route(
+            "/v1/connector-packages/setup/callback",
+            post(setup_callback),
+        )
         // Remote Extensions
         .route("/v1/remote-extensions", post(install_extension))
         .route("/v1/remote-extensions/list", post(list_extensions))
         .route("/v1/remote-extensions/{id}", post(get_extension))
         .route("/v1/remote-extensions/{id}/update", post(update_extension))
         .route("/v1/remote-extensions/{id}/remove", post(remove_extension))
-        .route("/v1/remote-extensions/{id}/enable", post(set_extension_enabled))
-        .route("/v1/remote-extensions/{id}/conformance", post(record_extension_conformance))
-        .route("/v1/remote-extensions/{id}/renew-consent", post(renew_extension_consent))
-        .route("/v1/remote-extensions/{id}/quarantine", post(quarantine_extension))
+        .route(
+            "/v1/remote-extensions/{id}/enable",
+            post(set_extension_enabled),
+        )
+        .route(
+            "/v1/remote-extensions/{id}/conformance",
+            post(record_extension_conformance),
+        )
+        .route(
+            "/v1/remote-extensions/{id}/renew-consent",
+            post(renew_extension_consent),
+        )
+        .route(
+            "/v1/remote-extensions/{id}/quarantine",
+            post(quarantine_extension),
+        )
         // Connected Apps
         .route("/v1/remote-extensions/{id}/authorize", post(authorize_app))
         .route("/v1/connected-apps/callback", post(app_callback))
         .route("/v1/connected-apps/status", post(app_status))
-        .route("/v1/remote-extensions/{id}/connect-public", post(connect_public_app))
+        .route(
+            "/v1/remote-extensions/{id}/connect-public",
+            post(connect_public_app),
+        )
         .route("/v1/connected-apps/read", post(read_tool))
         .route("/v1/connected-apps/execute", post(execute_tool))
         // Skills
         .route("/v1/skills/private", post(publish_private_skill))
         .route("/v1/skills/curated", post(publish_curated_skill))
         .route("/v1/skills/list", post(list_skills))
-        .route("/v1/skills/{id}/versions/{version}", post(get_skill_version))
+        .route(
+            "/v1/skills/{id}/versions/{version}",
+            post(get_skill_version),
+        )
         .route("/v1/skills/{id}/install", post(install_skill))
         .route("/v1/skills/{id}/disable", post(disable_skill))
-        .route("/v1/agents/{agent_key}/effective-skills", post(effective_skills))
-        .route("/v1/agents/{agent_key}/skills/{skill_id}/load", post(load_skill_for_agent))
-        .route("/v1/agents/{agent_key}/skills/{skill_id}/enable", post(set_skill_agent_enabled))
+        .route(
+            "/v1/agents/{agent_key}/effective-skills",
+            post(effective_skills),
+        )
+        .route(
+            "/v1/agents/{agent_key}/skills/{skill_id}/load",
+            post(load_skill_for_agent),
+        )
+        .route(
+            "/v1/agents/{agent_key}/skills/{skill_id}/enable",
+            post(set_skill_agent_enabled),
+        )
         // Enforce HMAC authentication on all API routes
         .layer(middleware::from_fn_with_state(
             verifier,

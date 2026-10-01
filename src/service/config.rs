@@ -20,10 +20,12 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
-        let bind_address = env::var("VOX_CONNECTIONS_BIND_ADDRESS")
-            .unwrap_or_else(|_| "0.0.0.0:3003".to_string());
+        let bind_address =
+            env::var("VOX_CONNECTIONS_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:3003".to_string());
 
-        let database_url = env::var("DATABASE_URL").ok().filter(|s| !s.trim().is_empty());
+        let database_url = env::var("DATABASE_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
 
         let hmac_secret = env::var("VOX_CONNECTIONS_HMAC_SECRET")
             .or_else(|_| env::var("VOX_HMAC_SECRET"))
@@ -41,11 +43,15 @@ impl ServiceConfig {
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(300);
 
-        let credential_key = env::var("VOX_CREDENTIAL_KEY").ok().filter(|s| !s.trim().is_empty());
+        let credential_key = env::var("VOX_CREDENTIAL_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
         let redirect_uris = env::var("VOX_MCP_OAUTH_REDIRECT_URIS")
             .map(|uris| uris.split(',').map(|s| s.trim().to_string()).collect())
             .unwrap_or_default();
-        let oauth_clients = env::var("VOX_MCP_OAUTH_CLIENTS").ok().filter(|s| !s.trim().is_empty());
+        let oauth_clients = env::var("VOX_MCP_OAUTH_CLIENTS")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
 
         let connected_apps = ConnectedAppsOptions {
             credential_key,

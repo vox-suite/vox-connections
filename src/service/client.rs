@@ -7,15 +7,15 @@ use crate::{
     service::{
         auth::{HEADER_NONCE, HEADER_SIGNATURE, HEADER_TIMESTAMP, HmacSigner},
         routes::{
-            ContextRequest, CreateGrantBody, PackageInstallBody, SetupCallbackBody,
-            SetupStartBody, WithdrawPackageBody,
+            ContextRequest, CreateGrantBody, PackageInstallBody, SetupCallbackBody, SetupStartBody,
+            WithdrawPackageBody,
         },
     },
     setup::{SetupRequest, SetupResult},
     skills::SkillListing,
 };
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
-use serde::{de::DeserializeOwned, Serialize};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+use serde::{Serialize, de::DeserializeOwned};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -92,7 +92,8 @@ impl ConnectionsServiceClient {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             HEADER_SIGNATURE,
-            HeaderValue::from_str(&signature).map_err(|e| ClientError::SigningError(e.to_string()))?,
+            HeaderValue::from_str(&signature)
+                .map_err(|e| ClientError::SigningError(e.to_string()))?,
         );
         headers.insert(
             HEADER_TIMESTAMP,
@@ -101,8 +102,7 @@ impl ConnectionsServiceClient {
         );
         headers.insert(
             HEADER_NONCE,
-            HeaderValue::from_str(&nonce)
-                .map_err(|e| ClientError::SigningError(e.to_string()))?,
+            HeaderValue::from_str(&nonce).map_err(|e| ClientError::SigningError(e.to_string()))?,
         );
 
         let resp = self
@@ -202,7 +202,8 @@ impl ConnectionsServiceClient {
         &self,
         pkg: PublishPackage,
     ) -> Result<ConnectorPackage, ClientError> {
-        self.signed_post("/v1/connector-packages/publish", &pkg).await
+        self.signed_post("/v1/connector-packages/publish", &pkg)
+            .await
     }
 
     pub async fn list_packages(
@@ -304,10 +305,7 @@ impl ConnectionsServiceClient {
         &self,
         context: &RequestContext,
     ) -> Result<Vec<SkillListing>, ClientError> {
-        self.signed_post(
-            "/v1/skills/list",
-            &ContextRequest { context: *context },
-        )
-        .await
+        self.signed_post("/v1/skills/list", &ContextRequest { context: *context })
+            .await
     }
 }

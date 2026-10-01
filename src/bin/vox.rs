@@ -1,7 +1,7 @@
 //! Authoring and deployment tooling use the same validators as the platform.
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, env, fs, path::Path};
+use std::{collections::BTreeMap, env, fs, io::Read, path::Path};
 use vox_connections::{
     packages::{PackageMetadata, package_bytes},
     remote_extensions::{InstallExtensionRequest, RemoteExtensionService},
@@ -13,6 +13,38 @@ struct Package {
     version: i32,
     manifest: InstallExtensionRequest,
     metadata: PackageMetadata,
+}
+
+const MAX_RETAINED_REPORT_BYTES: u64 = 256 * 1024;
+
+/// Bind the local publication evidence to its exact retained bytes. This is
+/// an integrity check, not independent verification of provider behavior.
+fn validate_retained_report(path: &Path, review: &serde_json::Value) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "report.json must contain the retained independent operator report")?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_RETAINED_REPORT_BYTES {
+        return Err("report.json must be a regular file of at most 256 KiB".into());
+    }
+    let file = fs::File::open(path).map_err(|_| "Cannot read report.json")?;
+    let mut bytes = Vec::new();
+    file.take(MAX_RETAINED_REPORT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Cannot read report.json")?;
+    if bytes.is_empty()
+        || bytes.iter().all(u8::is_ascii_whitespace)
+        || bytes.len() as u64 > MAX_RETAINED_REPORT_BYTES
+    {
+        return Err("report.json must contain a nonempty report of at most 256 KiB".into());
+    }
+    let digest = hex::encode(Sha256::digest(&bytes));
+    if review
+        .pointer("/evidence/report_digest")
+        .and_then(serde_json::Value::as_str)
+        != Some(digest.as_str())
+    {
+        return Err("report.json bytes do not match review.json evidence.report_digest".into());
+    }
+    Ok(())
 }
 
 fn read_skill(root: &Path) -> Result<vox_connections::skills::PublishSkillRequest, String> {
@@ -140,6 +172,7 @@ async fn run() -> Result<(), String> {
             let digest=hex::encode(Sha256::digest(package_bytes(&p.manifest,&p.metadata).map_err(|e|e.to_string())?));
             vox_connections::packages::validate_publish_review(&review,&digest,p.version,&p.metadata,&p.manifest)
                 .map_err(|_|"review.json must attest this exact package version, digest, protocol, live inventory and behavior (including read effects), with a retained report digest")?;
+            validate_retained_report(&Path::new(directory).join("report.json"), &review)?;
             let deployment_id=deployment.parse().map_err(|_|"Deployment must be a UUID")?;
             let token=env::var("VOX_OPERATOR_TOKEN").map_err(|_|"VOX_OPERATOR_TOKEN is required in the environment")?;
             let url=url::Url::parse(endpoint).map_err(|e|e.to_string())?;
@@ -152,4 +185,75 @@ async fn run() -> Result<(), String> {
         _=>return Err("Usage: vox defaults publish <deployment-key> | skill check <directory> | package init <directory> [--mcp] | package check <directory> | package test <directory> --sandbox | package publish <directory> <https-core-url> <deployment-uuid>".into()),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod retained_report_tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    struct ReportFixture(PathBuf);
+
+    impl ReportFixture {
+        fn new() -> Self {
+            let path = env::temp_dir().join(format!("vox-report-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn report(&self) -> PathBuf {
+            self.0.join("report.json")
+        }
+    }
+
+    impl Drop for ReportFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn review_for(bytes: &[u8]) -> serde_json::Value {
+        json!({"evidence": {"report_digest": hex::encode(Sha256::digest(bytes))}})
+    }
+
+    #[test]
+    fn publication_evidence_matches_exact_retained_bytes() {
+        let fixture = ReportFixture::new();
+        let bytes = b"{\"independent_review\":\"retained evidence\"}\n";
+        fs::write(fixture.report(), bytes).unwrap();
+        let review = review_for(bytes);
+        assert!(validate_retained_report(&fixture.report(), &review).is_ok());
+        fs::write(fixture.report(), &bytes[..bytes.len() - 1]).unwrap();
+        assert!(validate_retained_report(&fixture.report(), &review).is_err());
+        assert!(validate_retained_report(&fixture.report(), &json!({})).is_err());
+    }
+
+    #[test]
+    fn missing_empty_oversized_and_non_file_reports_are_rejected() {
+        let fixture = ReportFixture::new();
+        assert!(validate_retained_report(&fixture.report(), &review_for(b"evidence")).is_err());
+        for bytes in [
+            vec![],
+            b" \n\t".to_vec(),
+            vec![b'x'; MAX_RETAINED_REPORT_BYTES as usize + 1],
+        ] {
+            fs::write(fixture.report(), &bytes).unwrap();
+            assert!(validate_retained_report(&fixture.report(), &review_for(&bytes)).is_err());
+        }
+        fs::remove_file(fixture.report()).unwrap();
+        fs::create_dir(fixture.report()).unwrap();
+        assert!(validate_retained_report(&fixture.report(), &review_for(b"evidence")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_reports_are_rejected() {
+        let fixture = ReportFixture::new();
+        let bytes = b"retained evidence";
+        let target = fixture.0.join("target.json");
+        fs::write(&target, bytes).unwrap();
+        std::os::unix::fs::symlink(target, fixture.report()).unwrap();
+        assert!(validate_retained_report(&fixture.report(), &review_for(bytes)).is_err());
+    }
 }

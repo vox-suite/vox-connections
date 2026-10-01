@@ -1,9 +1,9 @@
 use axum::{
+    Json,
     extract::{Request, State},
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use hmac::{Hmac, Mac};
 use serde_json::json;
@@ -37,15 +37,9 @@ pub enum HmacAuthError {
     #[error("invalid header format for: {0}")]
     InvalidHeaderFormat(&'static str),
     #[error("request timestamp expired: diff={diff_secs}s, max_skew={max_skew_secs}s")]
-    TimestampExpired {
-        diff_secs: i64,
-        max_skew_secs: i64,
-    },
+    TimestampExpired { diff_secs: i64, max_skew_secs: i64 },
     #[error("request timestamp is too far in future: diff={diff_secs}s, max_skew={max_skew_secs}s")]
-    TimestampInFuture {
-        diff_secs: i64,
-        max_skew_secs: i64,
-    },
+    TimestampInFuture { diff_secs: i64, max_skew_secs: i64 },
     #[error("nonce has already been used (replay detected): {0}")]
     NonceReplayed(String),
     #[error("HMAC signature verification failed")]
@@ -258,8 +252,7 @@ impl HmacVerifier {
 
         // Compute expected HMAC
         let body_hash = HmacSigner::compute_body_hash(body);
-        let canonical =
-            HmacSigner::canonical_message(method, path, timestamp, nonce, &body_hash);
+        let canonical = HmacSigner::canonical_message(method, path, timestamp, nonce, &body_hash);
 
         let mut mac = HmacSha256::new_from_slice(secret)
             .map_err(|e| HmacAuthError::CryptoError(e.to_string()))?;
@@ -376,13 +369,19 @@ mod tests {
         let tampered_path = verifier
             .verify("POST", "/v1/other/path", body, &headers2, now)
             .await;
-        assert!(matches!(tampered_path, Err(HmacAuthError::InvalidSignature)));
+        assert!(matches!(
+            tampered_path,
+            Err(HmacAuthError::InvalidSignature)
+        ));
 
         // Tampered body fails
         let tampered_body = verifier
             .verify(method, path, b"tampered", &headers2, now)
             .await;
-        assert!(matches!(tampered_body, Err(HmacAuthError::InvalidSignature)));
+        assert!(matches!(
+            tampered_body,
+            Err(HmacAuthError::InvalidSignature)
+        ));
 
         // Expired timestamp fails
         let mut headers_expired = HeaderMap::new();
@@ -395,6 +394,9 @@ mod tests {
         let expired = verifier
             .verify(method, path, body, &headers_expired, now)
             .await;
-        assert!(matches!(expired, Err(HmacAuthError::TimestampExpired { .. })));
+        assert!(matches!(
+            expired,
+            Err(HmacAuthError::TimestampExpired { .. })
+        ));
     }
 }

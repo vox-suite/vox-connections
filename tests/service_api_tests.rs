@@ -12,10 +12,9 @@ use uuid::Uuid;
 use vox_connections::{
     identity::{DeploymentId, RequestContext, RequestSubject, UserContextId, UserId},
     service::{
-        auth::{
-            HEADER_NONCE, HEADER_SIGNATURE, HEADER_TIMESTAMP, HmacSigner, HmacVerifier,
-        },
-        build_service_router, ServiceState,
+        ServiceState,
+        auth::{HEADER_NONCE, HEADER_SIGNATURE, HEADER_TIMESTAMP, HmacSigner, HmacVerifier},
+        build_service_router,
     },
 };
 
@@ -274,14 +273,18 @@ async fn test_connections_service_client_e2e() {
     let err = client.list_connections(&ctx).await.unwrap_err();
     match err {
         vox_connections::service::ClientError::ServerError { status, .. } => {
-            assert_eq!(status, 503, "Valid HMAC reached handler which returned 503 (no db pool)");
+            assert_eq!(
+                status, 503,
+                "Valid HMAC reached handler which returned 503 (no db pool)"
+            );
         }
         other => panic!("expected ServerError 503, got {:?}", other),
     }
 
     // 3. Test signed endpoint call with invalid HMAC secret:
     // Blocked by HMAC middleware before reaching route handler (returns 401 Unauthorized)
-    let bad_client = ConnectionsServiceClient::new(format!("http://{addr}"), "wrong-secret-key-000000000000");
+    let bad_client =
+        ConnectionsServiceClient::new(format!("http://{addr}"), "wrong-secret-key-000000000000");
     let err = bad_client.list_connections(&ctx).await.unwrap_err();
     match err {
         vox_connections::service::ClientError::ServerError { status, .. } => {
@@ -292,4 +295,3 @@ async fn test_connections_service_client_e2e() {
 
     server_handle.abort();
 }
-
