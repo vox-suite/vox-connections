@@ -13,6 +13,7 @@ use crate::remote_extensions::adapters::transport::client_for_endpoint;
 pub struct ToolCall<'a> {
     pub name: &'a str,
     pub expected_protocol: Option<&'a str>,
+    pub reviewed_schema: &'a Value,
     pub arguments: Value,
 }
 
@@ -70,8 +71,9 @@ impl McpDiscoveryClient {
         Ok((info, tools))
     }
 
-    /// Execute one already-authorized tool through a fresh authenticated MCP
-    /// session. Authorization and effect checks belong to the caller.
+    /// Execute one already-authorized tool only after its live schema matches
+    /// the reviewed declaration in the same session. This checks advertised
+    /// inventory, not real-world effects; authority checks belong to the caller.
     pub async fn call_tool(
         &self,
         endpoint: &str,
@@ -80,20 +82,36 @@ impl McpDiscoveryClient {
         timeout: Duration,
         allow_local: bool,
     ) -> Result<Value, ConnectedAppError> {
-        let http = self.client(endpoint, allow_local).await?;
-        let mut session = McpSession::open(http, endpoint, access_token, timeout).await?;
-        if call
-            .expected_protocol
-            .is_some_and(|expected| expected != session.protocol_version)
-        {
-            return Err(ConnectedAppError::Invalid);
-        }
-        session
-            .request(
-                "tools/call",
-                json!({"name": call.name, "arguments": call.arguments}),
-            )
-            .await
+        // Pagination and negotiation must share the call's deadline rather
+        // than multiplying its timeout while the caller holds authority locks.
+        tokio::time::timeout(timeout, async {
+            let http = self.client(endpoint, allow_local).await?;
+            let mut session = McpSession::open(http, endpoint, access_token, timeout).await?;
+            if call
+                .expected_protocol
+                .is_some_and(|expected| expected != session.protocol_version)
+            {
+                return Err(ConnectedAppError::Invalid);
+            }
+            let tools = session.list_tools().await?;
+            let mut matching = tools
+                .iter()
+                .filter(|tool| tool.get("name").and_then(Value::as_str) == Some(call.name));
+            if matching.next().and_then(|tool| tool.get("inputSchema"))
+                != Some(call.reviewed_schema)
+                || matching.next().is_some()
+            {
+                return Err(ConnectedAppError::UnknownTool);
+            }
+            session
+                .request(
+                    "tools/call",
+                    json!({"name": call.name, "arguments": call.arguments}),
+                )
+                .await
+        })
+        .await
+        .map_err(|_| ConnectedAppError::Timeout)?
     }
 }
 
@@ -532,5 +550,326 @@ mod protocol_tests {
             assert_eq!(tools[0]["name"], "echo.read");
             server.join().expect("mock server finished");
         }
+    }
+}
+
+#[cfg(test)]
+mod dispatch_inventory_tests {
+    use super::*;
+    use axum::{Json, Router, extract::State, http::HeaderMap, routing::post};
+
+    #[derive(Clone)]
+    struct Fixture {
+        modern: bool,
+        pages: Vec<Value>,
+        delay: Duration,
+        requests: Arc<Mutex<Vec<(String, HeaderMap)>>>,
+    }
+
+    struct Server {
+        endpoint: String,
+        fixture: Fixture,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Server {
+        async fn start(modern: bool, pages: Vec<Value>, delay: Duration) -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
+            let fixture = Fixture {
+                modern,
+                pages,
+                delay,
+                requests: Arc::default(),
+            };
+            let router = Router::new()
+                .route("/mcp", post(respond))
+                .with_state(fixture.clone());
+            let task = tokio::spawn(async move {
+                axum::serve(listener, router).await.unwrap();
+            });
+            Self {
+                endpoint,
+                fixture,
+                task,
+            }
+        }
+
+        fn methods(&self) -> Vec<String> {
+            self.fixture
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(method, _)| method.clone())
+                .collect()
+        }
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn respond(
+        State(fixture): State<Fixture>,
+        headers: HeaderMap,
+        Json(request): Json<Value>,
+    ) -> (HeaderMap, Json<Value>) {
+        let method = request["method"].as_str().unwrap();
+        fixture
+            .requests
+            .lock()
+            .unwrap()
+            .push((method.into(), headers));
+        let id = &request["id"];
+        let mut response_headers = HeaderMap::new();
+        let result = match method {
+            "server/discover" if fixture.modern => {
+                tokio::time::sleep(fixture.delay).await;
+                json!({"resultType":"complete","supportedVersions":[MODERN_PROTOCOL_VERSION]})
+            }
+            "server/discover" => {
+                return (
+                    response_headers,
+                    Json(
+                        json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"unsupported method"}}),
+                    ),
+                );
+            }
+            "initialize" => {
+                response_headers.insert("mcp-session-id", "inventory-session".parse().unwrap());
+                json!({"protocolVersion":HANDSHAKE_PROTOCOL_VERSION,"serverInfo":{}})
+            }
+            "notifications/initialized" => return (response_headers, Json(json!({}))),
+            "tools/list" => {
+                tokio::time::sleep(fixture.delay).await;
+                let index = request
+                    .pointer("/params/cursor")
+                    .and_then(Value::as_str)
+                    .map(|cursor| cursor.parse::<usize>().unwrap())
+                    .unwrap_or(0);
+                if fixture.pages.is_empty() {
+                    return (
+                        response_headers,
+                        Json(
+                            json!({"jsonrpc":"2.0","id":id,"error":{"code":-32603,"message":"inventory unavailable"}}),
+                        ),
+                    );
+                }
+                fixture.pages[index.min(fixture.pages.len() - 1)].clone()
+            }
+            "tools/call" => json!({"content":[{"type":"text","text":"fixture result"}]}),
+            _ => panic!("unexpected method {method}"),
+        };
+        (
+            response_headers,
+            Json(json!({"jsonrpc":"2.0","id":id,"result":result})),
+        )
+    }
+
+    fn schema() -> Value {
+        json!({"type":"object","properties":{"text":{"type":"string"}}})
+    }
+
+    async fn dispatch(
+        server: &Server,
+        name: &str,
+        protocol: &str,
+        timeout: Duration,
+    ) -> Result<Value, ConnectedAppError> {
+        McpDiscoveryClient::default()
+            .call_tool(
+                &server.endpoint,
+                "fixture-token",
+                ToolCall {
+                    name,
+                    expected_protocol: Some(protocol),
+                    reviewed_schema: &schema(),
+                    arguments: json!({"text":"fixture"}),
+                },
+                timeout,
+                true,
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn reads_and_writes_validate_inventory_in_the_dispatch_session_for_both_protocols() {
+        for modern in [true, false] {
+            for name in ["fixture.read", "fixture.write"] {
+                let server = Server::start(
+                    modern,
+                    vec![json!({"tools":[{"name":name,"inputSchema":schema()}]})],
+                    Duration::ZERO,
+                )
+                .await;
+                let protocol = if modern {
+                    MODERN_PROTOCOL_VERSION
+                } else {
+                    HANDSHAKE_PROTOCOL_VERSION
+                };
+                dispatch(&server, name, protocol, Duration::from_secs(5))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    server.methods(),
+                    if modern {
+                        vec!["server/discover", "tools/list", "tools/call"]
+                    } else {
+                        vec![
+                            "server/discover",
+                            "initialize",
+                            "notifications/initialized",
+                            "tools/list",
+                            "tools/call",
+                        ]
+                    }
+                );
+                let requests = server.fixture.requests.lock().unwrap();
+                for (method, headers) in requests
+                    .iter()
+                    .filter(|(method, _)| method == "tools/list" || method == "tools/call")
+                {
+                    assert_eq!(headers["authorization"], "Bearer fixture-token");
+                    assert_eq!(headers["mcp-protocol-version"], protocol);
+                    if modern {
+                        assert_eq!(headers["mcp-method"], method.as_str());
+                    } else {
+                        assert_eq!(headers["mcp-session-id"], "inventory-session");
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unavailable_missing_changed_or_duplicate_inventory_never_dispatches() {
+        for modern in [true, false] {
+            for pages in [
+                vec![],
+                vec![json!({"tools":[]})],
+                vec![json!({"tools":[{"name":"fixture.read","inputSchema":{"type":"object"}}]})],
+                vec![
+                    json!({"tools":[{"name":"fixture.read","inputSchema":schema()}],"nextCursor":"1"}),
+                    json!({"tools":[{"name":"fixture.read","inputSchema":schema()}]}),
+                ],
+            ] {
+                let server = Server::start(modern, pages, Duration::ZERO).await;
+                let protocol = if modern {
+                    MODERN_PROTOCOL_VERSION
+                } else {
+                    HANDSHAKE_PROTOCOL_VERSION
+                };
+                assert!(
+                    dispatch(&server, "fixture.read", protocol, Duration::from_secs(5))
+                        .await
+                        .is_err()
+                );
+                assert!(!server.methods().iter().any(|method| method == "tools/call"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn pagination_is_checked_before_dispatch_and_exhaustion_fails_closed() {
+        let server = Server::start(
+            true,
+            vec![
+                json!({"tools":[],"nextCursor":"1"}),
+                json!({"tools":[{"name":"fixture.read","inputSchema":schema()}]}),
+            ],
+            Duration::ZERO,
+        )
+        .await;
+        dispatch(
+            &server,
+            "fixture.read",
+            MODERN_PROTOCOL_VERSION,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            server.methods(),
+            ["server/discover", "tools/list", "tools/list", "tools/call"]
+        );
+        let repeated = Server::start(
+            true,
+            vec![
+                json!({"tools":[{"name":"fixture.read","inputSchema":schema()}],"nextCursor":"1"}),
+            ],
+            Duration::ZERO,
+        )
+        .await;
+        assert!(
+            dispatch(
+                &repeated,
+                "fixture.read",
+                MODERN_PROTOCOL_VERSION,
+                Duration::from_secs(5)
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            repeated
+                .methods()
+                .iter()
+                .filter(|method| method.as_str() == "tools/list")
+                .count(),
+            MAX_TOOL_PAGES
+        );
+        assert!(
+            !repeated
+                .methods()
+                .iter()
+                .any(|method| method == "tools/call")
+        );
+    }
+
+    #[tokio::test]
+    async fn protocol_mismatch_prevents_inventory_and_dispatch() {
+        let server = Server::start(
+            true,
+            vec![json!({"tools":[{"name":"fixture.read","inputSchema":schema()}]})],
+            Duration::ZERO,
+        )
+        .await;
+        assert!(matches!(
+            dispatch(
+                &server,
+                "fixture.read",
+                HANDSHAKE_PROTOCOL_VERSION,
+                Duration::from_secs(5)
+            )
+            .await,
+            Err(ConnectedAppError::Invalid)
+        ));
+        assert_eq!(server.methods(), ["server/discover"]);
+    }
+
+    #[tokio::test]
+    async fn negotiation_and_inventory_share_one_deadline() {
+        let server = Server::start(
+            true,
+            vec![json!({"tools":[{"name":"fixture.read","inputSchema":schema()}]})],
+            Duration::from_millis(120),
+        )
+        .await;
+        assert!(matches!(
+            dispatch(
+                &server,
+                "fixture.read",
+                MODERN_PROTOCOL_VERSION,
+                Duration::from_millis(200)
+            )
+            .await,
+            Err(ConnectedAppError::Timeout)
+        ));
+        let methods = server.methods();
+        assert_eq!(methods.first().map(String::as_str), Some("server/discover"));
+        assert!(!methods.iter().any(|method| method == "tools/call"));
     }
 }
