@@ -19,7 +19,7 @@ pub struct SetupConsent {
     pub enable_bundled_skills: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetupRequest {
     pub external_key: String,
@@ -29,7 +29,7 @@ pub struct SetupRequest {
     pub consent: Option<SetupConsent>,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SetupState {
     Authorize,
@@ -38,7 +38,7 @@ pub enum SetupState {
     AccountLinked,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SetupResult {
     pub setup_id: Option<Uuid>,
     pub extension_id: Uuid,

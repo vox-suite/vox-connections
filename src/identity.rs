@@ -19,12 +19,12 @@ pub struct UserContextId(pub Uuid);
 #[serde(transparent)]
 pub struct DeploymentId(pub Uuid);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RequestSubject {
     pub deployment_id: DeploymentId,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RequestContext {
     pub id: UserContextId,
     pub user_id: UserId,

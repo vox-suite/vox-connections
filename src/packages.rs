@@ -96,7 +96,7 @@ impl PackageMetadata {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ConnectorPackage {
     pub version: i32,
     pub digest: String,

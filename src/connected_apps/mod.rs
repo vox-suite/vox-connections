@@ -84,7 +84,7 @@ pub struct AuthorizationStart {
 }
 
 /// Deployment-supplied OAuth and credential settings, independent of the host app.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct ConnectedAppsOptions {
     pub credential_key: Option<String>,
     pub redirect_uris: Vec<String>,

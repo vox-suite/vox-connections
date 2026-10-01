@@ -23,7 +23,7 @@ pub struct PublishSkillRequest {
     pub resources: Value,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SkillListing {
     pub id: Uuid,
     pub external_key: String,
@@ -36,7 +36,7 @@ pub struct SkillListing {
     pub update_available: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EffectiveSkill {
     pub id: Uuid,
     pub external_key: String,
@@ -47,7 +47,7 @@ pub struct EffectiveSkill {
     pub available_capabilities: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LoadedSkill {
     pub id: Uuid,
     pub external_key: String,
@@ -58,7 +58,7 @@ pub struct LoadedSkill {
     pub available_capabilities: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SkillVersion {
     pub title: String,
     pub summary: String,

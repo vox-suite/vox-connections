@@ -13,3 +13,4 @@ pub mod skills;
 
 pub mod defaults;
 pub mod discovery;
+pub mod service;

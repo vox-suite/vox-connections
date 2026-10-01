@@ -40,6 +40,78 @@ Authoring guides: [MCP integration](docs/mcp-authoring.md) and [declarative skil
 
 The [architecture review (2026-09-27)](docs/architecture-review-2026-09-27.md) records the current release gaps and the target connector authoring and installation path.
 
+## Standalone Service & HMAC Authentication
+
+`vox-connections` can be deployed as an independent microservice daemon (`vox-connections-service`) with zero dependency on `vox-core`.
+
+### Endpoints
+
+- **Health Checks** (unauthenticated):
+  - `GET /health/live` — liveness probe
+  - `GET /health/ready` — readiness probe (verifies database pool connectivity)
+- **Connections & OAuth**:
+  - `POST /v1/connections/list` — list active connections for `RequestContext`
+  - `POST /v1/connections/{id}/disconnect` — disconnect integration
+- **Capability Grants**:
+  - `POST /v1/capability-grants` — create scoped capability grant
+  - `POST /v1/capability-grants/revoke` — revoke grant
+  - `POST /v1/agents/{agent_key}/effective-capability-grants` — lookup effective grants for agent
+- **Packages & Setup**:
+  - `POST /v1/connector-packages/publish` — publish immutable connector package
+  - `POST /v1/connector-packages/list` — list available connector packages
+  - `POST /v1/connector-packages/install` — install digest-bound package
+  - `POST /v1/connector-packages/withdraw` — withdraw published package
+  - `POST /v1/connector-packages/setup` — initiate atomic connector setup
+  - `POST /v1/connector-packages/setup/callback` — complete OAuth callback
+- **Remote Extensions & Skills**:
+  - `POST /v1/remote-extensions/list` — list remote extension manifests
+  - `POST /v1/skills/list` — list available skills
+
+### HMAC-SHA256 Authentication Protocol
+
+All `/v1/*` API endpoints require HMAC-SHA256 signature verification.
+
+#### Required Headers
+
+| Header | Description |
+| --- | --- |
+| `x-vox-signature` | Hex-encoded HMAC-SHA256 string |
+| `x-vox-timestamp` | Integer Unix epoch seconds |
+| `x-vox-nonce` | Unique random UUID or nonce string |
+
+*(Note: `x-vox-host-signature`, `x-vox-host-timestamp`, and `x-vox-host-nonce` are supported as alternate headers).*
+
+#### Canonical Message Format
+
+```
+vox-hmac-v1:{method}:{path}:{timestamp}:{nonce}:{body_sha256}
+```
+
+Where `{body_sha256}` is the hex-encoded SHA-256 hash of the exact request body bytes (empty body defaults to `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`).
+
+#### Security Guarantees
+
+1. **Constant-Time Verification**: Prevents timing attacks via `subtle::ConstantTimeEq`.
+2. **Clock Skew Enforcement**: Rejects requests where `abs(now - timestamp) > max_clock_skew_seconds` (default: 300s).
+3. **Replay Prevention**: Tracks consumed nonces within the clock skew window; duplicate nonces within the window are rejected with `401 Unauthorized`.
+4. **Cache Poisoning Defense**: Nonces are only retained in memory *after* cryptographic signature validation succeeds.
+
+### Client Usage
+
+Consumers use `ConnectionsServiceClient` for strongly-typed, auto-signed communication:
+
+```rust
+use vox_connections::service::ConnectionsServiceClient;
+
+let client = ConnectionsServiceClient::new("http://connections:3003", hmac_secret);
+
+// Health
+let healthy = client.health_ready().await?;
+
+// Signed API calls
+let connections = client.list_connections(&context).await?;
+```
+
 ## Build and verify
 
 ```sh
@@ -49,3 +121,4 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 Integration behavior that reads or writes the database requires an isolated PostgreSQL instance. The included tests run without a database or provider credentials. When changing the shared crate, also compile and test the consuming Vox Core revision before release.
+
