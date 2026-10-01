@@ -162,10 +162,7 @@ impl GoogleReadAdapter {
         let result = self
             .get(token, "/calendar/v3/calendars/primary/events", &query)
             .await?;
-        let items = result
-            .get("items")
-            .and_then(Value::as_array)
-            .ok_or(ReadError::Unavailable)?;
+        let items = list_field(&result, "items")?;
         if items.len() > 100 {
             return Err(ReadError::Unavailable);
         }
@@ -209,10 +206,7 @@ impl GoogleReadAdapter {
             query.push(("pageToken", page));
         }
         let result = self.get(token, "/drive/v3/files", &query).await?;
-        let files = result
-            .get("files")
-            .and_then(Value::as_array)
-            .ok_or(ReadError::Unavailable)?;
+        let files = list_field(&result, "files")?;
         if files.len() > 100 {
             return Err(ReadError::Unavailable);
         }
@@ -223,6 +217,14 @@ impl GoogleReadAdapter {
         Ok(
             json!({"files":files.iter().map(|item| project(item, &["id","name","mimeType","modifiedTime","webViewLink"])).collect::<Vec<_>>(), "next_page_token":page_token(&result)?, "incomplete_search":incomplete, "complete":!incomplete && result.get("nextPageToken").is_none(), "content_included":false}),
         )
+    }
+}
+// Google may omit an empty repeated field in its JSON response.
+fn list_field<'a>(result: &'a Value, key: &str) -> Result<&'a [Value], ReadError> {
+    match result.get(key) {
+        None => Ok(&[]),
+        Some(Value::Array(values)) => Ok(values),
+        _ => Err(ReadError::Unavailable),
     }
 }
 fn page_token(result: &Value) -> Result<Option<&str>, ReadError> {
@@ -264,7 +266,7 @@ struct DriveArgs {
     #[serde(default)]
     page_token: Option<String>,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum ReadError {
     Invalid,
     Unauthorized,
@@ -376,6 +378,7 @@ mod tests {
     struct Provider {
         requests: Arc<Mutex<Vec<(String, String)>>>,
         status: Arc<Mutex<Option<StatusCode>>>,
+        body: Arc<Mutex<Option<Value>>>,
     }
     async fn google(
         State(provider): State<Provider>,
@@ -394,6 +397,9 @@ mod tests {
         if let Some(status) = *provider.status.lock().unwrap() {
             return (status, "private-error-with-token-canary").into_response();
         }
+        if let Some(body) = provider.body.lock().unwrap().clone() {
+            return Json(body).into_response();
+        }
         if uri.path().starts_with("/calendar/") {
             Json(json!({"items":[{"id":"event1","summary":"Review","start":{"dateTime":"2026-10-01T10:00:00Z"},"end":{"dateTime":"2026-10-01T11:00:00Z"},"description":"unneeded","access_token":"do-not-return"}],"timeZone":"UTC","nextPageToken":"calendar-page-2"})).into_response()
         } else {
@@ -405,6 +411,42 @@ mod tests {
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         (origin, task)
+    }
+    #[tokio::test]
+    async fn omitted_lists_are_empty_and_malformed_lists_are_rejected() {
+        let provider = Provider::default();
+        let (origin, task) = serve(
+            Router::new()
+                .route("/calendar/v3/calendars/primary/events", get(google))
+                .route("/drive/v3/files", get(google))
+                .with_state(provider.clone()),
+        )
+        .await;
+        let adapter = GoogleReadAdapter::with_local_upstream_for_testing(&origin).unwrap();
+        for body in [json!({}), json!({"items":[], "files":[]})] {
+            *provider.body.lock().unwrap() = Some(body);
+            let calendar = adapter
+                .calendar(
+                    "fixture",
+                    json!({"time_min":"2026-10-01T00:00:00Z", "time_max":"2026-10-02T00:00:00Z"}),
+                )
+                .await
+                .unwrap();
+            let drive = adapter.drive("fixture", json!({})).await.unwrap();
+            assert_eq!(calendar["events"], json!([]));
+            assert_eq!(drive["files"], json!([]));
+            assert_eq!(calendar["complete"], true);
+            assert_eq!(drive["complete"], true);
+        }
+        for malformed in [Value::Null, json!({}), json!("invalid")] {
+            *provider.body.lock().unwrap() = Some(json!({"items":malformed,"files":malformed}));
+            assert!(matches!(adapter.calendar("fixture", json!({"time_min":"2026-10-01T00:00:00Z", "time_max":"2026-10-02T00:00:00Z"})).await, Err(ReadError::Unavailable)));
+            assert!(matches!(
+                adapter.drive("fixture", json!({})).await,
+                Err(ReadError::Unavailable)
+            ));
+        }
+        task.abort();
     }
     #[tokio::test]
     async fn real_rest_reads_use_fixed_gets_projection_and_explicit_pagination() {
