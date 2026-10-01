@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "manifest": {
+    "external_key": "google-calendar-reader",
+    "display_name": "Google primary Calendar reader",
+    "protocol": "mcp",
+    "endpoint_url": "https://google-read-adapter.example.com/calendar/mcp",
+    "operator": {
+      "operator_id": "vox-deployment",
+      "operator_name": "Your reviewed Vox deployment operator"
+    },
+    "capabilities": [
+      {
+        "external_key": "google_calendar.list_events",
+        "display_name": "Google primary Calendar reader",
+        "effect": "read",
+        "consequential": false,
+        "data_recipients": [
+          "Google",
+          "Your reviewed Vox deployment operator"
+        ],
+        "access_needs": [
+          "https://www.googleapis.com/auth/calendar.events.readonly"
+        ],
+        "optional_guarantees": {},
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "page_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "page_token": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "time_min": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 64
+            },
+            "time_max": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 64
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "time_min",
+            "time_max"
+          ]
+        },
+        "supported_regions": []
+      }
+    ]
+  },
+  "metadata": {
+    "schema_version": 1,
+    "protocol_version": "2025-11-25",
+    "auth_mode": "oauth",
+    "credential_custody": "platform_held",
+    "skills": []
+  }
+}

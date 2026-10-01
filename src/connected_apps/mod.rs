@@ -212,6 +212,9 @@ impl ConnectedAppsService {
     }
 
     fn configured_for(&self, endpoint: &str) -> Option<&ConfiguredClient> {
+        if let Some(client) = self.configured.get(endpoint) {
+            return Some(client);
+        }
         let host = Url::parse(endpoint).ok()?.host_str()?.to_ascii_lowercase();
         self.configured.get(&host)
     }
