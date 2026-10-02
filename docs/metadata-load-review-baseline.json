@@ -1,0 +1,38 @@
+{
+  "claim": "Local warm metadata baseline; excludes model/provider/network/refresh latency and is not a production SLA",
+  "debug_build": true,
+  "elapsed_seconds": 0.255519792,
+  "environment": "Local review verification on shared workstation; no external providers",
+  "fixture": {
+    "concurrent_contexts": 20,
+    "connections_per_context": 20,
+    "contexts": 20,
+    "inventory_pages": 6,
+    "pool_connections": 20,
+    "provider_calls": 0,
+    "rounds_per_context": 25,
+    "runtime_threads": 4,
+    "schema_loads_per_selection": 1,
+    "skills_per_context": 40
+  },
+  "implementation_base": "ae4294d90402efc429e7f54c65c2ea0f4a8bce9d",
+  "measured_at_utc": "2026-10-02T02:37:21.477359+00:00",
+  "operations_per_second": 3913.5911632238644,
+  "postgres_version": "18.6 (Homebrew)",
+  "search": {
+    "max_ms": 66.49083399999999,
+    "p50_ms": 2.089875,
+    "p95_ms": 8.778334000000001,
+    "samples": 500
+  },
+  "search_response_bytes": {
+    "max": 443,
+    "min": 443
+  },
+  "selected_schema_load": {
+    "max_ms": 21.270917,
+    "p50_ms": 4.838708,
+    "p95_ms": 8.934917,
+    "samples": 500
+  }
+}
