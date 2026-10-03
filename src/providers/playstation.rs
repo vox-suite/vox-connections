@@ -51,34 +51,6 @@ pub struct PlayStationRecentActivityResponse {
     pub freshness_seconds: u32,
 }
 
-/// Prepared Span representation of a gaming session ready to be saved in the database.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct PlayStationSpanInput {
-    pub user_id: Uuid,
-    pub user_context_id: Uuid,
-    pub title: String,
-    pub notes: String,
-    pub category: String,
-    pub source: String,
-    pub source_ref: String,
-    pub status: String,
-    pub start_at: DateTime<Utc>,
-    pub end_at: DateTime<Utc>,
-    pub execution_type: String,
-    pub data: serde_json::Value,
-}
-
-/// Summary report returned after syncing PlayStation activity to Spans.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct PlayStationSyncResult {
-    pub user_id: Uuid,
-    pub user_context_id: Uuid,
-    pub connection_id: Option<Uuid>,
-    pub synced_spans_count: usize,
-    pub span_ids: Vec<Uuid>,
-    pub games_processed: Vec<String>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum PlayStationError {
     #[error("connection not found")]
@@ -95,6 +67,10 @@ pub enum PlayStationError {
     ProviderError(String),
     #[error("worker sync error: {0}")]
     WorkerError(String),
+    #[error("PlayStation credentials are not configured")]
+    NotConfigured,
+    #[error("invalid PlayStation request or response")]
+    Invalid,
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 }
@@ -123,7 +99,11 @@ impl DefaultPlayStationProviderClient {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("PSN HTTP client"),
         }
     }
 }
@@ -290,6 +270,7 @@ pub struct PlayStationService {
     connections: ConnectionService,
     grants: CapabilityGrantService,
     client: Arc<dyn PlayStationProviderClient>,
+    accounts: Option<super::playstation_account::PlayStationAccounts>,
 }
 
 impl PlayStationService {
@@ -304,7 +285,16 @@ impl PlayStationService {
             connections,
             grants,
             client,
+            accounts: None,
         }
+    }
+
+    pub fn with_accounts(
+        mut self,
+        accounts: super::playstation_account::PlayStationAccounts,
+    ) -> Self {
+        self.accounts = Some(accounts);
+        self
     }
 
     /// Canonical integration declaration for PlayStation matching the integration registry.
@@ -416,8 +406,15 @@ impl PlayStationService {
             ));
         }
 
-        let mock_token = "authorized-psn-token";
-        let games = self.client.fetch_recently_played(mock_token, limit).await?;
+        let accounts = self
+            .accounts
+            .as_ref()
+            .ok_or(PlayStationError::NotConfigured)?;
+        let mut tx = self._db.begin().await?;
+        sqlx::query("SELECT id FROM external_connections WHERE id=$1 AND user_context_id=$2 AND authorization_state='authorized' FOR UPDATE").bind(connection_id).bind(context.id.0).fetch_optional(&mut *tx).await?.ok_or(PlayStationError::ReconnectRequired)?;
+        let token = accounts.access_token(&mut tx, connection_id).await?;
+        let games = self.client.fetch_recently_played(&token, limit).await?;
+        tx.commit().await?;
         let count = games.len();
 
         Ok(PlayStationRecentActivityResponse {
@@ -428,252 +425,8 @@ impl PlayStationService {
     }
 }
 
-/// PlayStation 5 Activity Worker.
-///
-/// Polls/extracts game history from PlayStation Network and records
-/// each played game as a Span in the Vox timeline.
-#[derive(Clone)]
-pub struct PlayStationActivityWorker {
-    db: sqlx::PgPool,
-    connections: ConnectionService,
-    client: Arc<dyn PlayStationProviderClient>,
-}
-
-impl PlayStationActivityWorker {
-    pub fn new(
-        db: sqlx::PgPool,
-        connections: ConnectionService,
-        client: Arc<dyn PlayStationProviderClient>,
-    ) -> Self {
-        Self {
-            db,
-            connections,
-            client,
-        }
-    }
-
-    /// Pure function converting a list of played games into Span inputs.
-    pub fn extract_spans_from_games(
-        user_id: Uuid,
-        user_context_id: Uuid,
-        games: &[PlayStationGame],
-    ) -> Vec<PlayStationSpanInput> {
-        games
-            .iter()
-            .map(|g| {
-                // Determine sensible start and end times for the span.
-                // If play duration is available, start_at reflects the session start,
-                // capped to reasonable session length (e.g. at most 3 hours per recorded chunk).
-                let session_seconds = if g.play_duration_seconds > 0 {
-                    g.play_duration_seconds.min(10800)
-                } else {
-                    1800 // Default 30 min block if unknown
-                };
-
-                let start_at = g.last_played_at - Duration::seconds(session_seconds as i64);
-                let end_at = g.last_played_at;
-
-                // Format descriptive note with playtime stats
-                let hours = g.play_duration_seconds / 3600;
-                let minutes = (g.play_duration_seconds % 3600) / 60;
-                let playtime_str = if hours > 0 {
-                    format!("{}h {}m", hours, minutes)
-                } else {
-                    format!("{}m", minutes)
-                };
-
-                let notes = format!(
-                    "Played {} on {}. Total recorded playtime: {}.",
-                    g.name, g.platform, playtime_str
-                );
-
-                // Source reference key includes title ID and last played timestamp
-                // so subsequent syncs are idempotent, while new play sessions produce distinct spans.
-                let source_ref = format!("{}:{}", g.title_id, g.last_played_at.timestamp());
-
-                let data = json!({
-                    "integration": "playstation",
-                    "platform": g.platform,
-                    "title_id": g.title_id,
-                    "game_name": g.name,
-                    "category": g.category,
-                    "image_url": g.image_url,
-                    "play_duration_seconds": g.play_duration_seconds,
-                    "play_count": g.play_count,
-                    "first_played_at": g.first_played_at,
-                    "last_played_at": g.last_played_at,
-                });
-
-                PlayStationSpanInput {
-                    user_id,
-                    user_context_id,
-                    title: g.name.clone(),
-                    notes,
-                    category: "gaming".into(),
-                    source: "playstation".into(),
-                    source_ref,
-                    status: "done".into(),
-                    start_at,
-                    end_at,
-                    execution_type: "manual_human".into(),
-                    data,
-                }
-            })
-            .collect()
-    }
-
-    /// Syncs games for a specific user into the spans table.
-    pub async fn sync_user_activity(
-        &self,
-        user_id: Uuid,
-        user_context_id: Uuid,
-        access_token: &str,
-        limit: usize,
-    ) -> Result<PlayStationSyncResult, PlayStationError> {
-        let games = self
-            .client
-            .fetch_recently_played(access_token, limit)
-            .await?;
-
-        let span_inputs = Self::extract_spans_from_games(user_id, user_context_id, &games);
-        let mut span_ids = Vec::with_capacity(span_inputs.len());
-        let mut games_processed = Vec::with_capacity(span_inputs.len());
-
-        let mut tx = self.db.begin().await?;
-
-        for input in span_inputs {
-            let span_id = sqlx::query_scalar::<_, Uuid>(
-                "INSERT INTO spans (
-                    user_id, user_context_id, title, notes, category, source, source_ref,
-                    status, start_at, end_at, completed_at, execution_type, data, updated_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, now())
-                ON CONFLICT (user_id, source, source_ref) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    notes = EXCLUDED.notes,
-                    category = EXCLUDED.category,
-                    start_at = EXCLUDED.start_at,
-                    end_at = EXCLUDED.end_at,
-                    completed_at = EXCLUDED.completed_at,
-                    data = EXCLUDED.data,
-                    updated_at = now()
-                RETURNING id",
-            )
-            .bind(input.user_id)
-            .bind(input.user_context_id)
-            .bind(&input.title)
-            .bind(&input.notes)
-            .bind(&input.category)
-            .bind(&input.source)
-            .bind(&input.source_ref)
-            .bind(&input.status)
-            .bind(input.start_at)
-            .bind(input.end_at)
-            .bind(&input.execution_type)
-            .bind(&input.data)
-            .fetch_one(&mut *tx)
-            .await?;
-
-            span_ids.push(span_id);
-            games_processed.push(input.title);
-        }
-
-        tx.commit().await?;
-
-        Ok(PlayStationSyncResult {
-            user_id,
-            user_context_id,
-            connection_id: None,
-            synced_spans_count: span_ids.len(),
-            span_ids,
-            games_processed,
-        })
-    }
-
-    /// Syncs games for an existing connection ID, verifying connection authorization state.
-    pub async fn sync_connection_to_spans(
-        &self,
-        context: &RequestContext,
-        connection_id: Uuid,
-        limit: usize,
-    ) -> Result<PlayStationSyncResult, PlayStationError> {
-        let connection =
-            self.connections
-                .get(context, connection_id)
-                .await
-                .map_err(|e| match e {
-                    ConnectionError::NotFound => PlayStationError::ConnectionNotFound,
-                    ConnectionError::Database(err) => PlayStationError::Database(err),
-                    _ => PlayStationError::ConnectionNotFound,
-                })?;
-
-        if connection.integration_external_key != PLAYSTATION_INTEGRATION_KEY {
-            return Err(PlayStationError::InvalidIntegration);
-        }
-
-        if connection.authorization_state != AuthorizationState::Authorized {
-            return Err(PlayStationError::ReconnectRequired);
-        }
-
-        if connection.expires_at.is_some_and(|exp| exp <= Utc::now()) {
-            return Err(PlayStationError::ReconnectRequired);
-        }
-
-        let token = "authorized-psn-token";
-        let mut result = self
-            .sync_user_activity(context.user_id.0, context.id.0, token, limit)
-            .await?;
-        result.connection_id = Some(connection_id);
-        Ok(result)
-    }
-
-    /// Scans all active and authorized PlayStation connections and syncs their game activity into spans.
-    pub async fn sync_all_active_connections(
-        &self,
-        limit_per_connection: usize,
-    ) -> Result<Vec<PlayStationSyncResult>, PlayStationError> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, Uuid)>(
-            "SELECT c.id, c.user_context_id, uc.user_id
-             FROM external_connections c
-             JOIN integration_definitions i ON i.id = c.integration_id
-             JOIN user_contexts uc ON uc.id = c.user_context_id
-             WHERE i.external_key = $1
-               AND c.authorization_state = 'authorized'
-               AND (c.expires_at IS NULL OR c.expires_at > now())",
-        )
-        .bind(PLAYSTATION_INTEGRATION_KEY)
-        .fetch_all(&self.db)
-        .await?;
-
-        let mut results = Vec::new();
-        for (connection_id, user_context_id, user_id) in rows {
-            let token = "authorized-psn-token";
-            match self
-                .sync_user_activity(user_id, user_context_id, token, limit_per_connection)
-                .await
-            {
-                Ok(mut res) => {
-                    res.connection_id = Some(connection_id);
-                    results.push(res);
-                }
-                Err(err) => {
-                    // Log error and continue to other connections without crashing worker
-                    tracing::warn!(
-                        connection_id = %connection_id,
-                        user_id = %user_id,
-                        error = %err,
-                        "Failed to sync PlayStation connection"
-                    );
-                }
-            }
-        }
-
-        Ok(results)
-    }
-}
-
 /// Helper function to parse JSON response from PlayStation Network gamelist endpoints.
-fn parse_titles_from_json(
+pub(crate) fn parse_titles_from_json(
     body: &serde_json::Value,
 ) -> Result<Vec<PlayStationGame>, PlayStationError> {
     let titles_array = if let Some(titles) = body.get("titles").and_then(|t| t.as_array()) {
@@ -681,7 +434,7 @@ fn parse_titles_from_json(
     } else if let Some(arr) = body.as_array() {
         arr
     } else {
-        return Ok(Vec::new());
+        return Err(PlayStationError::Invalid);
     };
 
     let mut result = Vec::new();
@@ -703,7 +456,7 @@ fn parse_titles_from_json(
             .to_string();
 
         if title_id.is_empty() || name.is_empty() {
-            continue;
+            return Err(PlayStationError::Invalid);
         }
 
         let platform = item
@@ -719,12 +472,12 @@ fn parse_titles_from_json(
                     s.to_string()
                 }
             })
-            .unwrap_or_else(|| "PS5".to_string());
+            .unwrap_or_else(|| "unknown".to_string());
 
         let category = item
             .get("category")
             .and_then(|v| v.as_str())
-            .unwrap_or("ps5_native_game")
+            .unwrap_or("unknown")
             .to_string();
 
         let image_url = item
@@ -744,10 +497,13 @@ fn parse_titles_from_json(
             .and_then(|v| v.as_str())
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(Utc::now);
+            .ok_or(PlayStationError::Invalid)?;
 
+        let Some(duration) = item.get("playDuration").filter(|value| !value.is_null()) else {
+            continue;
+        };
         let play_duration_seconds =
-            parse_play_duration(item.get("playDuration").unwrap_or(&serde_json::Value::Null));
+            checked_play_duration(duration).ok_or(PlayStationError::Invalid)?;
 
         let play_count = item.get("playCount").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
 
@@ -768,38 +524,49 @@ fn parse_titles_from_json(
 }
 
 /// Helper function to parse ISO 8601 duration strings (e.g. "PT2H15M30S") or numeric seconds.
-fn parse_play_duration(val: &serde_json::Value) -> u64 {
+fn checked_play_duration(val: &serde_json::Value) -> Option<u64> {
     if let Some(n) = val.as_u64() {
-        return n;
+        return Some(n);
     }
-    if let Some(f) = val.as_f64() {
-        return f as u64;
+    let s = val.as_str()?;
+    if let Ok(n) = s.parse::<u64>() {
+        return Some(n);
     }
-    if let Some(s) = val.as_str() {
-        if let Ok(n) = s.parse::<u64>() {
-            return n;
+    let time = s.strip_prefix("PT")?;
+    if time.is_empty() {
+        return None;
+    }
+    let mut total = 0u64;
+    let mut number = String::new();
+    let mut last = 0;
+    for c in time.chars() {
+        if c.is_ascii_digit() {
+            number.push(c);
+            continue;
         }
-        if s.starts_with("PT") {
-            let mut total_secs = 0u64;
-            let mut num_buf = String::new();
-            for c in s.chars().skip(2) {
-                if c.is_ascii_digit() {
-                    num_buf.push(c);
-                } else {
-                    let num = num_buf.parse::<u64>().unwrap_or(0);
-                    num_buf.clear();
-                    match c {
-                        'H' => total_secs += num * 3600,
-                        'M' => total_secs += num * 60,
-                        'S' => total_secs += num,
-                        _ => {}
-                    }
-                }
-            }
-            return total_secs;
+        let (order, multiplier) = match c {
+            'H' => (1, 3600),
+            'M' => (2, 60),
+            'S' => (3, 1),
+            _ => return None,
+        };
+        if order <= last {
+            return None;
         }
+        let n = number.parse::<u64>().ok()?;
+        total = total.checked_add(n.checked_mul(multiplier)?)?;
+        last = order;
+        number.clear();
     }
-    0
+    if !number.is_empty() || last == 0 {
+        return None;
+    }
+    Some(total)
+}
+
+#[cfg(test)]
+fn parse_play_duration(val: &serde_json::Value) -> u64 {
+    checked_play_duration(val).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -849,46 +616,6 @@ mod tests {
         assert_eq!(games[0].play_duration_seconds, 37800);
         assert_eq!(games[1].name, "Astro's Playroom");
         assert_eq!(games[1].play_duration_seconds, 3600);
-    }
-
-    #[test]
-    fn test_extract_spans_from_games() {
-        let user_id = Uuid::new_v4();
-        let user_context_id = Uuid::new_v4();
-        let last_played = Utc::now();
-
-        let games = vec![PlayStationGame {
-            title_id: "PPSA01876_00".into(),
-            name: "Elden Ring".into(),
-            platform: "PS5".into(),
-            category: "ps5_native_game".into(),
-            image_url: None,
-            first_played_at: Some(last_played - Duration::days(10)),
-            last_played_at: last_played,
-            play_duration_seconds: 7200,
-            play_count: 10,
-        }];
-
-        let spans =
-            PlayStationActivityWorker::extract_spans_from_games(user_id, user_context_id, &games);
-
-        assert_eq!(spans.len(), 1);
-        let span = &spans[0];
-        assert_eq!(span.user_id, user_id);
-        assert_eq!(span.user_context_id, user_context_id);
-        assert_eq!(span.title, "Elden Ring");
-        assert_eq!(span.category, "gaming");
-        assert_eq!(span.source, "playstation");
-        assert_eq!(
-            span.source_ref,
-            format!("PPSA01876_00:{}", last_played.timestamp())
-        );
-        assert_eq!(span.status, "done");
-        assert_eq!(span.execution_type, "manual_human");
-        assert!(span.end_at >= span.start_at);
-        assert!(span.notes.contains("Played Elden Ring on PS5"));
-        assert_eq!(span.data["platform"], "PS5");
-        assert_eq!(span.data["title_id"], "PPSA01876_00");
     }
 
     #[tokio::test]

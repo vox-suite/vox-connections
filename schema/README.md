@@ -13,3 +13,5 @@ A host must authenticate users, scope context IDs, restrict its database role to
 Vox Core uses its existing incremental migrations. Do not apply this snapshot to a Vox Core database. When the connector schema changes, update the snapshot and verify it both in an independent-host database and with the consuming Vox Core revision.
 
 `packages.sql` adds the immutable deployment catalog and installation bindings. Existing independent-host databases built from the previous snapshot apply this addition once. Vox Core applies its matching incremental package migration.
+
+`playstation.sql` adds encrypted PSN credentials and activity checkpoints. Apply it after `connectors.sql`, including on existing independent-host databases before upgrading the connection service. Core applies its matching incremental migration.

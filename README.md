@@ -8,7 +8,7 @@ Contains:
 - `integration_registry` — capability declarations and per-deployment discovery.
 - `providers::{amazon, playstation, uber, zomato}` — provider clients and workers built on top of the above:
   - `amazon` — Creators API catalog discovery and labelled purchase handoff.
-  - `playstation` — PlayStation 5 / PSN activity extraction and timeline sync worker that records gaming sessions as Spans.
+  - `playstation` — PSN account verification, encrypted credential refresh, bounded game-history reads and observed playtime deltas. Core owns scheduling and span ingestion.
   - `uber` — Connected read trip history and estimate options.
   - `zomato` — Restaurant search and labelled order handoff.
 

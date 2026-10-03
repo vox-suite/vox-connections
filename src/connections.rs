@@ -156,6 +156,10 @@ impl ConnectionService {
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query("DELETE FROM playstation_accounts WHERE connection_id=$1")
+            .bind(connection_id)
+            .execute(&mut *tx)
+            .await?;
         if let Some(extension_id) = remote_extension_id {
             sqlx::query("DELETE FROM remote_extension_credentials WHERE extension_id=$1")
                 .bind(extension_id)
