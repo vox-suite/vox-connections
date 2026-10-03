@@ -51,3 +51,4 @@ jobs:
           cargo test --test postgres_integration -- --ignored
           cargo test --test setup_integration -- --ignored
           cargo test --test google_read_integration -- --ignored
+          cargo test --test metadata_load -- --ignored
