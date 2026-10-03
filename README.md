@@ -21,7 +21,7 @@ Contains:
 | `remote_extensions::adapters` | Direct and MCP transports, DNS and address checks, context minimization, integrity, response redaction, per-protocol switches |
 | `connected_apps` | Provider OAuth, encrypted credentials, and MCP tool discovery |
 | `skills` | Versioned declarative packages, installation, per-agent enablement and bounded loading |
-| `providers` | Amazon, Uber, Zomato and Expedia provider clients and data contracts |
+| `providers` | Amazon, PlayStation, Uber, Zomato and Expedia provider clients and data contracts |
 | `conformance` | Versioned fixtures and a reference implementation for cross-host behavioral checks |
 
 Provider adapters are separate modules. Hosts enable only the integrations and capabilities they offer; installing an extension or skill grants no account access. Remote integrations are protocol-neutral declarations. MCP is one transport, and neither MCP nor a skill bypasses grants or approval policy.
@@ -39,6 +39,16 @@ Package onboarding: [publish, discover, install](docs/packages.md). New MCP conn
 Authoring guides: [MCP integration](docs/mcp-authoring.md) and [declarative skills](docs/declarative-skills.md). Their local probes and examples live in `tools/` and `examples/`.
 
 The [architecture review (2026-09-27)](docs/architecture-review-2026-09-27.md) records the current release gaps and the target connector authoring and installation path.
+
+## PlayStation accounts
+
+The PlayStation provider connects a PSN account to read PS5 and PS4 game activity through a community integration. It verifies the account against Sony, exchanges the NPSSO session token without storing it, and encrypts access and refresh tokens. Game reads provide cumulative playtime and provider first/last-played timestamps; they do not provide exact session boundaries.
+
+In Vox, Core consumes this crate directly. Core API handles linking and manual refresh, and Core Worker captures new playtime once a day. This flow does not require a separate `vox-connections-service` deployment. The standalone service endpoints below do not expose Core's PlayStation linking or span-capture routes.
+
+Independent hosts must apply [`schema/playstation.sql`](schema/playstation.sql) after the connector schema and supply a credential encryption key when constructing `PlayStationAccounts`. Vox Core supplies its own migration and `VOX_CREDENTIAL_KEY`. Disconnecting deletes stored PlayStation credentials; linking alone creates no agent grants.
+
+See [Core's PlayStation setup and capture contract](https://github.com/vox-suite/vox-core/blob/main/docs/playstation.md). Publish this crate first, then update Core's dependency lockfile before releasing the consuming services.
 
 ## Standalone Service & HMAC Authentication
 
