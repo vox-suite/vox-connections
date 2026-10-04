@@ -5,7 +5,7 @@ use ring::{
 };
 use sha2::{Digest, Sha256};
 
-use super::ConnectedAppError;
+use crate::accounts::FreshConnectionError as ConnectedAppError;
 
 /// AES-256-GCM for OAuth secrets at rest. Every value is bound to the row it
 /// belongs to through the associated data, so a ciphertext copied into another
@@ -17,16 +17,14 @@ pub struct CredentialCipher {
 
 impl CredentialCipher {
     pub fn from_hex_key(value: &str) -> Result<Self, ConnectedAppError> {
-        let bytes = hex::decode(value.trim()).map_err(|_| ConnectedAppError::NotConfigured)?;
-        let key: [u8; 32] = bytes
-            .try_into()
-            .map_err(|_| ConnectedAppError::NotConfigured)?;
+        let bytes = hex::decode(value.trim()).map_err(|_| ConnectedAppError::Crypto)?;
+        let key: [u8; 32] = bytes.try_into().map_err(|_| ConnectedAppError::Crypto)?;
         Ok(Self { key })
     }
 
     fn cipher(&self) -> Result<LessSafeKey, ConnectedAppError> {
         let key = UnboundKey::new(&aead::AES_256_GCM, &self.key)
-            .map_err(|_| ConnectedAppError::NotConfigured)?;
+            .map_err(|_| ConnectedAppError::Crypto)?;
         Ok(LessSafeKey::new(key))
     }
 
@@ -83,4 +81,19 @@ pub fn pkce_challenge(verifier: &str) -> String {
 
 pub fn sha256_hex(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn ciphertext_is_account_bound_and_tamper_evident() {
+        let cipher = CredentialCipher::from_hex_key(&"ab".repeat(32)).unwrap();
+        let mut sealed = cipher.seal(b"account-a", "secret").unwrap();
+        assert_eq!(cipher.open(b"account-a", &sealed).unwrap(), "secret");
+        assert!(cipher.open(b"account-b", &sealed).is_err());
+        sealed[12] ^= 1;
+        assert!(cipher.open(b"account-a", &sealed).is_err());
+        assert!(CredentialCipher::from_hex_key("invalid").is_err());
+    }
 }
