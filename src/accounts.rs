@@ -108,15 +108,6 @@ pub trait TimelineIngestor: Send + Sync {
         connection_id: Uuid,
         activities: &[crate::providers::observations::ObservedActivity],
     ) -> Result<usize, FreshConnectionError>;
-    async fn game_history(
-        &self,
-        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        _user_id: Uuid,
-        _connection_id: Uuid,
-        _games: &[PlayStationGame],
-    ) -> Result<usize, FreshConnectionError> {
-        Ok(0)
-    }
     async fn food_order(
         &self,
         _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -923,17 +914,13 @@ impl FreshConnectionsService {
             self.ingestor
                 .gaming(&mut tx, user_id, connection_id, &activities)
                 .await?
-                + self
-                    .ingestor
-                    .game_history(&mut tx, user_id, connection_id, &games)
-                    .await?
         } else {
             0
         };
         snapshots = crate::providers::observations::checkpoint(&snapshots, &games, now);
 
         sqlx::query(
-            "UPDATE vox_connections SET access_ciphertext = $1, refresh_ciphertext = $2, access_expires_at = $3, metadata = $4, last_synced_at = now(), next_sync_at = now() + interval '1 day', failure_code = NULL, failure_count = 0, lease_token=NULL, lease_until=NULL, updated_at = now() WHERE id = $5"
+            "UPDATE vox_connections SET access_ciphertext = $1, refresh_ciphertext = $2, access_expires_at = $3, metadata = $4, last_synced_at = now(), next_sync_at = now() + interval '10 minutes', failure_code = NULL, failure_count = 0, lease_token=NULL, lease_until=NULL, updated_at = now() WHERE id = $5"
         )
         .bind(access_cipher)
         .bind(refresh_cipher)
