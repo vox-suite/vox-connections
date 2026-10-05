@@ -1,10 +1,10 @@
-# Five-commit recovery inventory
+# Recovery inventory
 
-Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `e4d108df64413d19521f968d940f94ddeab8900b`.
+Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `4eafba6893bfa351aafe3d5ff571042ffeaacf3d`.
 
 This inventory records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.
 
-The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these five commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.
+The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these six commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.
 
 ## Per-commit file changes
 
@@ -146,6 +146,14 @@ The author’s apparent intent was a curated native account/timeline replacement
 | `src/providers/swiggy.rs` | rewritten | 1 / 1 | Retained with current behavior |
 | `src/providers/zomato.rs` | rewritten | 1 / 1 | Combined: old public surface plus new provider/account behavior |
 
+### 4eafba6 — Spotify: drop playlists and extra scopes; timeline listening history only
+
+| File | Classification | Added / deleted | Recovery disposition |
+| --- | --- | --- | --- |
+| `docs/personal-integrations.md` | rewritten | 1 / 1 | Retained with current behavior |
+| `src/account_tests.rs` | rewritten | 0 / 1 | Retained with current behavior |
+| `src/providers/personal.rs` | rewritten | 2 / 8 | Retained with current behavior |
+
 ## Public API changes
 
 Complete exact signatures, re-exports and source locations for every changed Rust file are in [recovery-inventory.json](recovery-inventory.json). Changed signatures appear once as a removal and once as an addition. This is an exact source declaration inventory, not a claim that each declaration was reachable through every old module export.
@@ -154,7 +162,7 @@ Recovery restores all former module paths and provider service exports. Curated 
 
 ## Core correspondence
 
-Core baseline: parent of `e4a9b96`; recovery starts at `1ea0089`. Native connection APIs, worker scheduling, WiZ, map tools, notification delivery, new OAuth callback presentation and personal ingestion are retained. The table below accounts for every file changed by the corresponding retirement commit.
+Core baseline: parent of `e4a9b96`; recovery includes upstream through `9491212`. Native connection APIs, worker scheduling, WiZ, map tools, notification delivery, new OAuth callback presentation and personal ingestion are retained. The table below accounts for every file changed by the corresponding retirement commit.
 
 | Core file | Recovery disposition |
 | --- | --- |
@@ -251,13 +259,107 @@ Core baseline: parent of `e4a9b96`; recovery starts at `1ea0089`. Native connect
 | `src/status/mod.rs` | Retained and reconciled with restored platform where affected |
 | `src/storage/spans.rs` | Retained; not part of connector recovery |
 | `src/workers/task_executor.rs` | Restored governed behavior alongside retained native APIs |
+### Core 0b4ba34 — Isolate ingestion notification regression by user
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/connection_ingestion_tests.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core 95eb1c8 — Include Core-owned bundled skills in release images
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Dockerfile` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Dockerfile.worker` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core 7dca9f2 — Add WiZ lights agent tool, food/personal connections, bump vox-connections
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/cors.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/main.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/routes/connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/agents/conversation.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/mod.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/wiz.rs` | newly added | Retained; shared implementations delegated to Connections where applicable |
+| `src/application/spans.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/connection_ingestion_tests.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/map_scene.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/storage/spans.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core 368df63 — Fix lint and agent tool-set test for WiZ tool
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/agents/conversation.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/wiz.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core a81c26b — Bump vox-connections (split Swiggy/Zomato modules), use provider_label
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core 02bb419 — Bump vox-connections: enable Swiggy by default
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core 1ea0089 — Branded OAuth callback page
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `services/api/routes/callback_page.rs` | newly added | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/routes/connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/routes/mod.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core ffc9010 — Bump vox-connections: Spotify timeline-only
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core b192c38 — PlayStation: drop title prefix; store game cover image on history spans
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core fc0955a — Bulk-upsert personal activity (YouTube/Spotify) in batches instead of two queries per record
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
+### Core 9491212 — PlayStation: first/last played markers; schedule observed sessions from last-played time
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+
 
 ## Data that the code restoration cannot recover
 
-Core’s retirement migration revoked grants and external connections, expired unused decisions, dropped credential/OAuth state, packages/installations, setup records, PlayStation credential records and compact tool metadata, then renamed six surviving platform tables. Forward recovery restores names and empty storage, rebuilds metadata from retained declarations, and preserves surviving IDs and revoked states. It does not revive grants, approvals or deleted credentials. Packages require republication/review and affected accounts require reconnecting.
+Core’s retirement migration revoked grants and external connections, expired unused decisions, dropped credential/OAuth state, packages/installations, setup records, PlayStation credential records and compact tool metadata, then renamed six surviving platform tables. Deployments which have not yet run retirement use an additive pre-retirement safeguard to preserve these rows and their existing authority. Already-retired deployments cannot recover deleted records: forward recovery restores names and empty storage, rebuilds metadata from retained declarations, and preserves surviving IDs and revoked states. It does not revive grants, approvals or deleted credentials. Packages require republication/review and affected accounts require reconnecting.
 
 Curated ciphertext retains its original user/provider associated-data interpretation. Context ownership is enforced separately by validated scopes, composite foreign keys and context-specific queries. Ambiguous legacy accounts retain IDs and ciphertext but are excluded from all reads/scheduled sync until explicit reassociation.
 
 ## Compatibility and release gates
 
-Native host UIs must expose explicit grants via restored authenticated platform routes. Linking does not auto-grant the Personal Assistant. The account read tool will deny access until a grant exists. Any host relying on automatic access must update its grant journey before release. Real provider account authorization and production callback allowlisting remain deployment validation gates.
+Host compatibility blocker: https://github.com/vox-suite/vox-web/issues/27. Native host UIs must expose explicit grants via restored authenticated platform routes. Linking does not auto-grant the Personal Assistant. The account read tool will deny access until a grant exists. Any host relying on automatic access must update its grant journey before release. Real provider account authorization and production callback allowlisting remain deployment validation gates.
+
+## Current restored declarations
+
+The JSON also records the current declarations for every library Rust source, including restored modules and compatibility signatures. Provider source declarations are distinct from deployment-verified access.

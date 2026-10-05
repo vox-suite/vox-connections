@@ -401,6 +401,8 @@ impl FreshConnectionsService {
         self.require_grant(&context, agent, id, &connector).await?;
         let result = self.read_personal_in_context(user_id, id).await?;
         self.require_grant(&context, agent, id, &connector).await?;
+        crate::remote_extensions::adapters::privacy::scan_for_prohibited_content(&result)
+            .map_err(|_| FreshConnectionError::Unauthorized)?;
         Ok(result)
     }
 
@@ -1647,7 +1649,7 @@ impl FreshConnectionsService {
                 .await?;
                 access = next;
             }
-            let items = match connector {
+            match connector {
                 "google_calendar" => serde_json::to_value(
                     self.google
                         .events(&access, now - Duration::days(7), now + Duration::days(30))
@@ -1666,8 +1668,7 @@ impl FreshConnectionsService {
                 )
                 .map_err(|_| FreshConnectionError::Invalid("Invalid gaming response".into()))?,
                 _ => return Err(FreshConnectionError::NotFound),
-            };
-            items
+            }
         };
         let list = items
             .as_array_mut()
