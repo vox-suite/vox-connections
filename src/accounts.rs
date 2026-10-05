@@ -160,6 +160,261 @@ pub struct FreshConnectionsService {
 }
 
 impl FreshConnectionsService {
+    /// Owner-facing account snapshot for a host UI. Agent callers must use read_personal.
+    pub async fn read_personal_account(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        id: Uuid,
+    ) -> Result<Value, FreshConnectionError> {
+        let context = self.resolve_scope(scope).await?;
+        self.read_personal_in_context(context, id).await
+    }
+    /// Explicitly associate an otherwise inaccessible legacy account with this host context.
+    pub async fn reassociate(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        id: Uuid,
+    ) -> Result<(), FreshConnectionError> {
+        let context = self.resolve_scope(scope).await?;
+        let owner = self.owner(context).await?;
+        let result = sqlx::query("UPDATE vox_connections SET user_context_id=$1,generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,failure_code=NULL WHERE id=$2 AND user_id=$3 AND user_context_id IS NULL")
+            .bind(context).bind(id).bind(owner).execute(&self.pool).await?;
+        if result.rows_affected() != 1 {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        Ok(())
+    }
+
+    pub async fn sync_zomato(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        id: Uuid,
+    ) -> Result<usize, FreshConnectionError> {
+        let context = self.resolve_scope(scope).await?;
+        self.sync_zomato_in_context(context, id).await
+    }
+
+    pub async fn sync_swiggy(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        id: Uuid,
+    ) -> Result<usize, FreshConnectionError> {
+        let context = self.resolve_scope(scope).await?;
+        self.sync_swiggy_in_context(context, id).await
+    }
+
+    async fn resolve_scope(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+    ) -> Result<Uuid, FreshConnectionError> {
+        let context = scope.request_context();
+        let id = sqlx::query_scalar(
+            "SELECT id FROM user_contexts WHERE id=$1 AND user_id=$2 AND deployment_id=$3",
+        )
+        .bind(context.id.0)
+        .bind(context.user_id.0)
+        .bind(context.subject.deployment_id.0)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(FreshConnectionError::Unauthorized)?;
+        Ok(id)
+    }
+    async fn owner(&self, context: Uuid) -> Result<Uuid, FreshConnectionError> {
+        sqlx::query_scalar("SELECT user_id FROM user_contexts WHERE id=$1")
+            .bind(context)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(FreshConnectionError::Unauthorized)
+    }
+    async fn credential_aad(
+        &self,
+        context: Uuid,
+        connector: &str,
+    ) -> Result<String, FreshConnectionError> {
+        Ok(format!("{}:{connector}", self.owner(context).await?))
+    }
+    async fn require_grant(
+        &self,
+        context: &crate::identity::RequestContext,
+        agent: &str,
+        id: Uuid,
+        connector: &str,
+    ) -> Result<(), FreshConnectionError> {
+        let allowed = crate::capability_grants::CapabilityGrantService::new(self.pool.clone())
+            .effective_for_tool(context, agent, id, &format!("curated_{connector}.read"))
+            .await
+            .map_err(|_| FreshConnectionError::Unauthorized)?;
+        if allowed.is_none() {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        Ok(())
+    }
+    pub async fn list_connections(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+    ) -> Result<Vec<ConnectionItem>, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.list_connections_in_context(user_id).await
+    }
+
+    pub async fn start(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        req: StartConnectionRequest,
+    ) -> Result<StartConnectionResponse, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.start_in_context(user_id, req).await
+    }
+
+    pub async fn get_setup_status(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        setup_id: Uuid,
+    ) -> Result<SetupStatusResponse, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.get_setup_status_in_context(user_id, setup_id).await
+    }
+
+    pub async fn update_preferences(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        connection_id: Uuid,
+        req: PreferencesRequest,
+    ) -> Result<ConnectionItem, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.update_preferences_in_context(user_id, connection_id, req)
+            .await
+    }
+
+    pub async fn refresh(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        connection_id: Uuid,
+    ) -> Result<RefreshResponse, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.refresh_in_context(user_id, connection_id).await
+    }
+
+    pub async fn disconnect(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        connection_id: Uuid,
+    ) -> Result<(), FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        let owned: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM vox_connections WHERE id=$1 AND user_context_id=$2)",
+        )
+        .bind(connection_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        if !owned {
+            return Err(FreshConnectionError::NotFound);
+        }
+        self.disconnect_in_context(user_id, connection_id).await
+    }
+
+    pub async fn sync_google_calendar(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        connection_id: Uuid,
+    ) -> Result<usize, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.sync_google_calendar_in_context(user_id, connection_id)
+            .await
+    }
+
+    pub async fn sync_playstation(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        connection_id: Uuid,
+    ) -> Result<usize, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.sync_playstation_in_context(user_id, connection_id)
+            .await
+    }
+
+    pub async fn cancel_setup(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        setup_id: Uuid,
+    ) -> Result<(), FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.cancel_setup_in_context(user_id, setup_id).await
+    }
+
+    pub async fn assistant_read(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        agent: &str,
+        connector: &str,
+        limit: usize,
+    ) -> Result<Value, FreshConnectionError> {
+        let context = scope.request_context();
+        let user_id = self.resolve_scope(scope).await?;
+        let connection: Uuid = sqlx::query_scalar(
+            "SELECT id FROM vox_connections WHERE user_context_id=$1 AND connector_id=$2",
+        )
+        .bind(user_id)
+        .bind(connector)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(FreshConnectionError::Unauthorized)?;
+        self.require_grant(&context, agent, connection, connector)
+            .await?;
+        let result = self
+            .assistant_read_in_context(user_id, connector, limit)
+            .await?;
+        self.require_grant(&context, agent, connection, connector)
+            .await?;
+        crate::remote_extensions::adapters::privacy::scan_for_prohibited_content(&result)
+            .map_err(|_| FreshConnectionError::Unauthorized)?;
+        Ok(result)
+    }
+
+    pub async fn sync_personal(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        id: Uuid,
+        connector: &str,
+    ) -> Result<usize, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.sync_personal_in_context(user_id, id, connector).await
+    }
+
+    pub async fn read_personal(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        agent: &str,
+        id: Uuid,
+    ) -> Result<Value, FreshConnectionError> {
+        let context = scope.request_context();
+        let user_id = self.resolve_scope(scope).await?;
+        let connector: String = sqlx::query_scalar(
+            "SELECT connector_id FROM vox_connections WHERE id=$1 AND user_context_id=$2",
+        )
+        .bind(id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(FreshConnectionError::Unauthorized)?;
+        self.require_grant(&context, agent, id, &connector).await?;
+        let result = self.read_personal_in_context(user_id, id).await?;
+        self.require_grant(&context, agent, id, &connector).await?;
+        Ok(result)
+    }
+
+    pub async fn import_youtube_history(
+        &self,
+        scope: &impl crate::identity::RequestScope,
+        history: Value,
+        consent: bool,
+    ) -> Result<Value, FreshConnectionError> {
+        let user_id = self.resolve_scope(scope).await?;
+        self.import_youtube_history_in_context(user_id, history, consent)
+            .await
+    }
+
     pub fn new(
         pool: PgPool,
         credential_key: Option<&str>,
@@ -250,13 +505,13 @@ impl FreshConnectionsService {
         descriptors
     }
 
-    pub async fn list_connections(
+    pub(crate) async fn list_connections_in_context(
         &self,
         user_id: Uuid,
     ) -> Result<Vec<ConnectionItem>, FreshConnectionError> {
         let rows = sqlx::query(
             "SELECT id, connector_id, account_display_id, authorization_state, sync_timeline, assistant_read, last_synced_at, failure_code, created_at \
-             FROM vox_connections WHERE user_id = $1 ORDER BY created_at DESC"
+             FROM vox_connections WHERE user_context_id = $1 ORDER BY created_at DESC"
         )
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -278,7 +533,7 @@ impl FreshConnectionsService {
             .collect())
     }
 
-    pub async fn start(
+    pub(crate) async fn start_in_context(
         &self,
         user_id: Uuid,
         req: StartConnectionRequest,
@@ -311,8 +566,8 @@ impl FreshConnectionsService {
                     .bind(format!("setup:{user_id}:google_calendar"))
                     .execute(&mut *tx)
                     .await?;
-                sqlx::query("UPDATE vox_connection_setups SET status='cancelled', verifier_ciphertext=NULL WHERE user_id=$1 AND connector_id='google_calendar' AND status IN ('pending','exchanging')").bind(user_id).execute(&mut *tx).await?;
-                let setup_id = sqlx::query_scalar::<_, Uuid>("INSERT INTO vox_connection_setups(user_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES($1,'google_calendar',$2,$3,$4,now()) RETURNING id")
+                sqlx::query("UPDATE vox_connection_setups SET status='cancelled', verifier_ciphertext=NULL WHERE user_context_id=$1 AND connector_id='google_calendar' AND status IN ('pending','exchanging')").bind(user_id).execute(&mut *tx).await?;
+                let setup_id = sqlx::query_scalar::<_, Uuid>("INSERT INTO vox_connection_setups(user_id,user_context_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1,'google_calendar',$2,$3,$4,now()) RETURNING id")
                     .bind(user_id).bind(&state_token).bind(verifier_cipher).bind(&redirect_uri).fetch_one(&mut *tx).await?;
                 tx.commit().await?;
                 let auth_url = build_auth_url(client_id, &redirect_uri, &state_token, &verifier);
@@ -340,13 +595,13 @@ impl FreshConnectionsService {
                     .bind(format!("setup:{user_id}:playstation"))
                     .execute(&mut *setup_tx)
                     .await?;
-                sqlx::query("UPDATE vox_connection_setups SET status='cancelled' WHERE user_id=$1 AND connector_id='playstation' AND status IN ('pending','exchanging')").bind(user_id).execute(&mut *setup_tx).await?;
-                let setup_id:Uuid=sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,connector_id,state_token,status,consented_at) VALUES($1,'playstation',$2,'exchanging',now()) RETURNING id").bind(user_id).bind(crate::crypto::random_token()?).fetch_one(&mut *setup_tx).await?;
+                sqlx::query("UPDATE vox_connection_setups SET status='cancelled' WHERE user_context_id=$1 AND connector_id='playstation' AND status IN ('pending','exchanging')").bind(user_id).execute(&mut *setup_tx).await?;
+                let setup_id:Uuid=sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,user_context_id,connector_id,state_token,status,consented_at) VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1,'playstation',$2,'exchanging',now()) RETURNING id").bind(user_id).bind(crate::crypto::random_token()?).fetch_one(&mut *setup_tx).await?;
                 setup_tx.commit().await?;
                 let (account_id, display_id, access_token, refresh_token, access_expires_in) =
                     self.exchange_playstation_npsso(npsso).await?;
 
-                let aad = format!("{user_id}:playstation");
+                let aad = self.credential_aad(user_id, "playstation").await?;
                 let access_cipher = self
                     .cipher()?
                     .seal(aad.as_bytes(), &access_token)
@@ -372,10 +627,10 @@ impl FreshConnectionsService {
                 }
                 let conn_id = sqlx::query_scalar::<_, Uuid>(
                     "INSERT INTO vox_connections \
-                     (user_id, connector_id, account_id, account_display_id, access_ciphertext, refresh_ciphertext, access_expires_at, \
+                     (user_id,user_context_id, connector_id, account_id, account_display_id, access_ciphertext, refresh_ciphertext, access_expires_at, \
                       authorization_state, sync_timeline, assistant_read, metadata, last_synced_at, next_sync_at, failure_code, failure_count, updated_at, consented_at) \
-                     VALUES ($1, 'playstation', $2, $7, $3, $4, $5, 'authorized', true, true, $6, now(), now() + interval '1 day', NULL, 0, now(), now()) \
-                     ON CONFLICT (user_id, connector_id) DO UPDATE SET \
+                     VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1, 'playstation', $2, $7, $3, $4, $5, 'authorized', true, true, $6, now(), now() + interval '1 day', NULL, 0, now(), now()) \
+                     ON CONFLICT (user_context_id, connector_id) DO UPDATE SET \
                       generation = gen_random_uuid(), credential_generation=gen_random_uuid(), lease_token = NULL, lease_until = NULL, consented_at = now(), sync_timeline = true, assistant_read = true, \
               account_id = EXCLUDED.account_id, \
                       account_display_id = EXCLUDED.account_display_id, \
@@ -419,14 +674,14 @@ impl FreshConnectionsService {
         }
     }
 
-    pub async fn get_setup_status(
+    pub(crate) async fn get_setup_status_in_context(
         &self,
         user_id: Uuid,
         setup_id: Uuid,
     ) -> Result<SetupStatusResponse, FreshConnectionError> {
-        sqlx::query("UPDATE vox_connection_setups SET status='expired', verifier_ciphertext=NULL, error='setup_expired' WHERE id=$1 AND user_id=$2 AND expires_at <= now() AND status IN ('pending','exchanging')").bind(setup_id).bind(user_id).execute(&self.pool).await?;
+        sqlx::query("UPDATE vox_connection_setups SET status='expired', verifier_ciphertext=NULL, error='setup_expired' WHERE id=$1 AND user_context_id=$2 AND expires_at <= now() AND status IN ('pending','exchanging')").bind(setup_id).bind(user_id).execute(&self.pool).await?;
         let row = sqlx::query(
-            "SELECT status, connection_id, error FROM vox_connection_setups WHERE id = $1 AND user_id = $2"
+            "SELECT status, connection_id, error FROM vox_connection_setups WHERE id = $1 AND user_context_id = $2"
         )
         .bind(setup_id)
         .bind(user_id)
@@ -441,13 +696,13 @@ impl FreshConnectionsService {
         })
     }
 
-    pub async fn update_preferences(
+    pub(crate) async fn update_preferences_in_context(
         &self,
         user_id: Uuid,
         connection_id: Uuid,
         req: PreferencesRequest,
     ) -> Result<ConnectionItem, FreshConnectionError> {
-        let result = sqlx::query("UPDATE vox_connections SET sync_timeline=COALESCE($3,sync_timeline), assistant_read=COALESCE($4,assistant_read), generation=gen_random_uuid(), metadata=CASE WHEN $3=true AND NOT sync_timeline AND connector_id='playstation' THEN jsonb_set(metadata,'{baseline_required}','true') ELSE metadata END, next_sync_at=now(), updated_at=now() WHERE id=$1 AND user_id=$2")
+        let result = sqlx::query("UPDATE vox_connections SET sync_timeline=COALESCE($3,sync_timeline), assistant_read=COALESCE($4,assistant_read), generation=gen_random_uuid(), metadata=CASE WHEN $3=true AND NOT sync_timeline AND connector_id='playstation' THEN jsonb_set(metadata,'{baseline_required}','true') ELSE metadata END, next_sync_at=now(), updated_at=now() WHERE id=$1 AND user_context_id=$2")
             .bind(connection_id).bind(user_id).bind(req.sync_timeline).bind(req.assistant_read).execute(&self.pool).await?;
         if result.rows_affected() == 0 {
             return Err(FreshConnectionError::NotFound);
@@ -455,7 +710,7 @@ impl FreshConnectionsService {
 
         let updated = sqlx::query(
             "SELECT id, connector_id, account_display_id, authorization_state, sync_timeline, assistant_read, last_synced_at, failure_code, created_at \
-             FROM vox_connections WHERE id = $1 AND user_id = $2"
+             FROM vox_connections WHERE id = $1 AND user_context_id = $2"
         )
         .bind(connection_id)
         .bind(user_id)
@@ -475,44 +730,49 @@ impl FreshConnectionsService {
         })
     }
 
-    pub async fn refresh(
+    pub(crate) async fn refresh_in_context(
         &self,
         user_id: Uuid,
         connection_id: Uuid,
     ) -> Result<RefreshResponse, FreshConnectionError> {
-        let conn =
-            sqlx::query("SELECT connector_id FROM vox_connections WHERE id = $1 AND user_id = $2")
-                .bind(connection_id)
-                .bind(user_id)
-                .fetch_optional(&self.pool)
-                .await?
-                .ok_or(FreshConnectionError::NotFound)?;
+        let conn = sqlx::query(
+            "SELECT connector_id FROM vox_connections WHERE id = $1 AND user_context_id = $2",
+        )
+        .bind(connection_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(FreshConnectionError::NotFound)?;
 
         let connector_id: String = conn.get("connector_id");
         match connector_id.as_str() {
             "google_calendar" => {
-                let count = self.sync_google_calendar(user_id, connection_id).await?;
+                let count = self
+                    .sync_google_calendar_in_context(user_id, connection_id)
+                    .await?;
                 Ok(RefreshResponse {
                     refreshed: true,
                     spans_created: count,
                 })
             }
             "playstation" => {
-                let count = self.sync_playstation(user_id, connection_id).await?;
+                let count = self
+                    .sync_playstation_in_context(user_id, connection_id)
+                    .await?;
                 Ok(RefreshResponse {
                     refreshed: true,
                     spans_created: count,
                 })
             }
             "swiggy" => {
-                let count = self.sync_swiggy(user_id, connection_id).await?;
+                let count = self.sync_swiggy_in_context(user_id, connection_id).await?;
                 Ok(RefreshResponse {
                     refreshed: true,
                     spans_created: count,
                 })
             }
             "zomato" => {
-                let count = self.sync_zomato(user_id, connection_id).await?;
+                let count = self.sync_zomato_in_context(user_id, connection_id).await?;
                 Ok(RefreshResponse {
                     refreshed: true,
                     spans_created: count,
@@ -520,7 +780,7 @@ impl FreshConnectionsService {
             }
             "spotify" | "youtube" => {
                 let count = self
-                    .sync_personal(user_id, connection_id, &connector_id)
+                    .sync_personal_in_context(user_id, connection_id, &connector_id)
                     .await?;
                 Ok(RefreshResponse {
                     refreshed: true,
@@ -531,14 +791,14 @@ impl FreshConnectionsService {
         }
     }
 
-    pub async fn disconnect(
+    pub(crate) async fn disconnect_in_context(
         &self,
         user_id: Uuid,
         connection_id: Uuid,
     ) -> Result<(), FreshConnectionError> {
         let mut tx = self.pool.begin().await?;
         let connector: Option<String> = sqlx::query_scalar(
-            "SELECT connector_id FROM vox_connections WHERE id=$1 AND user_id=$2",
+            "SELECT connector_id FROM vox_connections WHERE id=$1 AND user_context_id=$2",
         )
         .bind(connection_id)
         .bind(user_id)
@@ -549,8 +809,8 @@ impl FreshConnectionsService {
                 .bind(format!("setup:{user_id}:{connector}"))
                 .execute(&mut *tx)
                 .await?;
-            sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL,error='authorization_cancelled' WHERE user_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')").bind(user_id).bind(connector).execute(&mut *tx).await?;
-            sqlx::query("DELETE FROM vox_connections WHERE id=$1 AND user_id=$2")
+            sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL,error='authorization_cancelled' WHERE user_context_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')").bind(user_id).bind(connector).execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM vox_connections WHERE id=$1 AND user_context_id=$2")
                 .bind(connection_id)
                 .bind(user_id)
                 .execute(&mut *tx)
@@ -567,7 +827,7 @@ impl FreshConnectionsService {
         state: &str,
     ) -> Result<Uuid, FreshConnectionError> {
         let setup = sqlx::query(
-            "UPDATE vox_connection_setups SET status='exchanging' WHERE state_token = $1 AND status = 'pending' AND expires_at > now() RETURNING id, user_id, verifier_ciphertext, redirect_uri"
+            "UPDATE vox_connection_setups SET status='exchanging' WHERE state_token = $1 AND user_context_id IS NOT NULL AND status = 'pending' AND expires_at > now() RETURNING id, user_context_id, verifier_ciphertext, redirect_uri"
         )
         .bind(state)
         .fetch_optional(&self.pool)
@@ -588,7 +848,7 @@ impl FreshConnectionsService {
         setup: &sqlx::postgres::PgRow,
     ) -> Result<Uuid, FreshConnectionError> {
         let setup_id: Uuid = setup.get("id");
-        let user_id: Uuid = setup.get("user_id");
+        let user_id: Uuid = setup.get("user_context_id");
 
         let client_id = self.google_client_id.as_deref().ok_or_else(|| {
             FreshConnectionError::NotConfigured("Google OAuth client ID missing".to_string())
@@ -636,7 +896,7 @@ impl FreshConnectionsService {
                 _ => FreshConnectionError::Provider("Google request failed".into()),
             })?;
 
-        let aad = format!("{user_id}:google_calendar");
+        let aad = self.credential_aad(user_id, "google_calendar").await?;
         let access_cipher = self
             .cipher()?
             .seal(aad.as_bytes(), &tokens.access_token)
@@ -667,10 +927,10 @@ impl FreshConnectionsService {
         }
         let connection_id = sqlx::query_scalar::<_, Uuid>(
             "INSERT INTO vox_connections \
-             (user_id, connector_id, account_id, account_display_id, access_ciphertext, refresh_ciphertext, access_expires_at, \
+             (user_id,user_context_id, connector_id, account_id, account_display_id, access_ciphertext, refresh_ciphertext, access_expires_at, \
               authorization_state, sync_timeline, assistant_read, updated_at, consented_at) \
-             VALUES ($1, 'google_calendar', $2, $3, $4, $5, $6, 'authorized', true, true, now(), now()) \
-             ON CONFLICT (user_id, connector_id) DO UPDATE SET \
+             VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1, 'google_calendar', $2, $3, $4, $5, $6, 'authorized', true, true, now(), now()) \
+             ON CONFLICT (user_context_id, connector_id) DO UPDATE SET \
               generation = gen_random_uuid(), credential_generation=gen_random_uuid(), lease_token = NULL, lease_until = NULL, consented_at = now(), sync_timeline = true, assistant_read = true, \
               account_id = EXCLUDED.account_id, \
               account_display_id = EXCLUDED.account_display_id, \
@@ -701,12 +961,12 @@ impl FreshConnectionsService {
         .await?;
 
         tx.commit().await?;
-        let _ = self.refresh(user_id, connection_id).await;
+        let _ = self.refresh_in_context(user_id, connection_id).await;
 
         Ok(connection_id)
     }
 
-    pub async fn sync_google_calendar(
+    pub(crate) async fn sync_google_calendar_in_context(
         &self,
         user_id: Uuid,
         connection_id: Uuid,
@@ -727,7 +987,7 @@ impl FreshConnectionsService {
         conn: &sqlx::postgres::PgRow,
     ) -> Result<usize, FreshConnectionError> {
         let sync_timeline: bool = conn.get("sync_timeline");
-        let aad = format!("{user_id}:google_calendar");
+        let aad = self.credential_aad(user_id, "google_calendar").await?;
 
         let mut access_token = {
             let ct: Option<Vec<u8>> = conn.get("access_ciphertext");
@@ -812,7 +1072,7 @@ impl FreshConnectionsService {
             self.ingestor
                 .calendar(
                     &mut tx,
-                    user_id,
+                    self.owner(user_id).await?,
                     connection_id,
                     &conn.get::<String, _>("account_id"),
                     &events,
@@ -835,7 +1095,7 @@ impl FreshConnectionsService {
         Ok(created_or_updated)
     }
 
-    pub async fn sync_playstation(
+    pub(crate) async fn sync_playstation_in_context(
         &self,
         user_id: Uuid,
         connection_id: Uuid,
@@ -857,7 +1117,7 @@ impl FreshConnectionsService {
     ) -> Result<usize, FreshConnectionError> {
         let account_id: String = conn.get("account_id");
         let sync_timeline: bool = conn.get("sync_timeline");
-        let aad = format!("{user_id}:playstation");
+        let aad = self.credential_aad(user_id, "playstation").await?;
 
         let rt_bytes: Option<Vec<u8>> = conn.get("refresh_ciphertext");
         let Some(rt_bytes) = rt_bytes else {
@@ -921,11 +1181,16 @@ impl FreshConnectionsService {
             .await?;
         let spans_created = if sync_timeline {
             self.ingestor
-                .gaming(&mut tx, user_id, connection_id, &activities)
+                .gaming(
+                    &mut tx,
+                    self.owner(user_id).await?,
+                    connection_id,
+                    &activities,
+                )
                 .await?
                 + self
                     .ingestor
-                    .game_history(&mut tx, user_id, connection_id, &games)
+                    .game_history(&mut tx, self.owner(user_id).await?, connection_id, &games)
                     .await?
         } else {
             0
@@ -987,9 +1252,9 @@ impl FreshConnectionsService {
             .bind(format!("setup:{user_id}:{connector}"))
             .execute(&mut *tx)
             .await?;
-        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL WHERE user_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')")
+        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL WHERE user_context_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')")
             .bind(user_id).bind(connector).execute(&mut *tx).await?;
-        let id: Uuid = sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES($1,$2,$3,$4,$5,now()) RETURNING id")
+        let id: Uuid = sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,user_context_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1,$2,$3,$4,$5,now()) RETURNING id")
             .bind(user_id).bind(connector).bind(&state).bind(sealed).bind(redirect).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok(StartConnectionResponse {
@@ -1011,7 +1276,7 @@ impl FreshConnectionsService {
                 "Provider disabled".into(),
             ));
         }
-        let setup = sqlx::query("UPDATE vox_connection_setups SET status='exchanging' WHERE connector_id=$1 AND state_token=$2 AND status='pending' AND expires_at>now() AND consented_at IS NOT NULL RETURNING *")
+        let setup = sqlx::query("UPDATE vox_connection_setups SET status='exchanging' WHERE connector_id=$1 AND state_token=$2 AND user_context_id IS NOT NULL AND status='pending' AND expires_at>now() AND consented_at IS NOT NULL RETURNING *")
             .bind(connector).bind(state).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
         let setup_id: Uuid = setup.get("id");
         let result = self
@@ -1033,7 +1298,7 @@ impl FreshConnectionsService {
         let code = code
             .filter(|s| !s.is_empty())
             .ok_or(FreshConnectionError::Unauthorized)?;
-        let user_id: Uuid = setup.get("user_id");
+        let user_id: Uuid = setup.get("user_context_id");
         let setup_id: Uuid = setup.get("id");
         let redirect: String = setup.get("redirect_uri");
         let encrypted: Vec<u8> = setup.get("verifier_ciphertext");
@@ -1054,7 +1319,7 @@ impl FreshConnectionsService {
             .fetch_orders(&tokens.access_token)
             .await
             .map_err(map_food_error)?;
-        let aad = format!("{user_id}:{connector}");
+        let aad = self.credential_aad(user_id, connector).await?;
         let access = self.cipher()?.seal(aad.as_bytes(), &tokens.access_token)?;
         let refresh = tokens
             .refresh_token
@@ -1072,11 +1337,11 @@ impl FreshConnectionsService {
         if valid.is_none() {
             return Err(FreshConnectionError::Unauthorized);
         }
-        let id: Uuid = sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,access_ciphertext,refresh_ciphertext,access_expires_at,authorization_state,sync_timeline,assistant_read,metadata,consented_at) VALUES($1,$2,$3,$4,$5,'authorized',true,true,$6,now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),credential_generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,access_ciphertext=EXCLUDED.access_ciphertext,refresh_ciphertext=EXCLUDED.refresh_ciphertext,access_expires_at=EXCLUDED.access_expires_at,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),failure_code=NULL,failure_count=0,account_id=NULL,account_display_id=NULL,updated_at=now() RETURNING id")
+        let id: Uuid = sqlx::query_scalar("INSERT INTO vox_connections(user_id,user_context_id,connector_id,access_ciphertext,refresh_ciphertext,access_expires_at,authorization_state,sync_timeline,assistant_read,metadata,consented_at) VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1,$2,$3,$4,$5,'authorized',true,true,$6,now()) ON CONFLICT (user_context_id, connector_id) DO UPDATE SET generation=gen_random_uuid(),credential_generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,access_ciphertext=EXCLUDED.access_ciphertext,refresh_ciphertext=EXCLUDED.refresh_ciphertext,access_expires_at=EXCLUDED.access_expires_at,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),failure_code=NULL,failure_count=0,account_id=NULL,account_display_id=NULL,updated_at=now() RETURNING id")
             .bind(user_id).bind(connector).bind(access).bind(refresh).bind(expires)
             .bind(json!({"auth_type":"oauth2","client_id":credentials.client_id})).fetch_one(&mut *tx).await?;
         self.ingestor
-            .food_order(&mut tx, user_id, id, &orders)
+            .food_order(&mut tx, self.owner(user_id).await?, id, &orders)
             .await?;
         let interval = food_sync_interval(&orders);
         sqlx::query("UPDATE vox_connections SET last_synced_at=now(),next_sync_at=now()+($2*interval '1 second') WHERE id=$1")
@@ -1084,7 +1349,8 @@ impl FreshConnectionsService {
         sqlx::query("UPDATE vox_connection_setups SET status='authorized',connection_id=$2,verifier_ciphertext=NULL WHERE id=$1")
             .bind(setup_id).bind(id).execute(&mut *tx).await?;
         tx.commit().await?;
-        self.ingestor.food_committed(user_id, &orders);
+        self.ingestor
+            .food_committed(self.owner(user_id).await?, &orders);
         Ok(id)
     }
     pub(crate) async fn sync_food(
@@ -1112,12 +1378,13 @@ impl FreshConnectionsService {
         self.validate_commit(&mut tx, user_id, id, conn).await?;
         let count = self
             .ingestor
-            .food_order(&mut tx, user_id, id, &orders)
+            .food_order(&mut tx, self.owner(user_id).await?, id, &orders)
             .await?;
         sqlx::query("UPDATE vox_connections SET last_synced_at=now(),next_sync_at=now()+($2*interval '1 second'),lease_token=NULL,lease_until=NULL,failure_count=0,failure_code=NULL,updated_at=now() WHERE id=$1")
             .bind(id).bind(food_sync_interval(&orders)).execute(&mut *tx).await?;
         tx.commit().await?;
-        self.ingestor.food_committed(user_id, &orders);
+        self.ingestor
+            .food_committed(self.owner(user_id).await?, &orders);
         Ok(count)
     }
     async fn food_orders_claimed(
@@ -1139,7 +1406,7 @@ impl FreshConnectionsService {
                 "Provider disabled".into(),
             ));
         }
-        let aad = format!("{user_id}:{connector}");
+        let aad = self.credential_aad(user_id, connector).await?;
         let access: Vec<u8> = conn
             .try_get("access_ciphertext")
             .map_err(|_| FreshConnectionError::Unauthorized)?;
@@ -1164,7 +1431,7 @@ impl FreshConnectionsService {
         connector: &str,
         conn: &sqlx::postgres::PgRow,
     ) -> Result<String, FreshConnectionError> {
-        let aad = format!("{user_id}:{connector}");
+        let aad = self.credential_aad(user_id, connector).await?;
         let refresh: Vec<u8> = conn
             .try_get("refresh_ciphertext")
             .map_err(|_| FreshConnectionError::Unauthorized)?;
@@ -1275,26 +1542,26 @@ impl FreshConnectionsService {
             base.trim_end_matches('/')
         ))
     }
-    pub async fn cancel_setup(
+    pub(crate) async fn cancel_setup_in_context(
         &self,
         user_id: Uuid,
         setup_id: Uuid,
     ) -> Result<(), FreshConnectionError> {
-        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',error='authorization_cancelled',verifier_ciphertext=NULL WHERE id=$1 AND user_id=$2 AND status IN ('pending','exchanging')").bind(setup_id).bind(user_id).execute(&self.pool).await?;
+        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',error='authorization_cancelled',verifier_ciphertext=NULL WHERE id=$1 AND user_context_id=$2 AND status IN ('pending','exchanging')").bind(setup_id).bind(user_id).execute(&self.pool).await?;
         Ok(())
     }
     pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError> {
         sqlx::query("UPDATE vox_connection_setups SET status='failed',error='authorization_failed',verifier_ciphertext=NULL WHERE state_token=$1 AND status='pending'").bind(state).execute(&self.pool).await?;
         Ok(())
     }
-    pub async fn assistant_read(
+    pub(crate) async fn assistant_read_in_context(
         &self,
         user_id: Uuid,
         connector: &str,
         limit: usize,
     ) -> Result<Value, FreshConnectionError> {
         self.cipher()?;
-        let conn=sqlx::query("UPDATE vox_connections SET lease_token=$3,lease_until=now()+interval '15 minutes' WHERE user_id=$1 AND connector_id=$2 AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL AND (lease_until IS NULL OR lease_until<=now()) RETURNING *")
+        let conn=sqlx::query("UPDATE vox_connections SET lease_token=$3,lease_until=now()+interval '15 minutes' WHERE user_context_id=$1 AND connector_id=$2 AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL AND (lease_until IS NULL OR lease_until<=now()) RETURNING *")
             .bind(user_id).bind(connector).bind(Uuid::new_v4()).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
         let id: Uuid = conn.get("id");
         let result = self
@@ -1321,7 +1588,7 @@ impl FreshConnectionsService {
             serde_json::to_value(self.food_orders_claimed(user_id, connector, conn).await?)
                 .map_err(|_| FreshConnectionError::Provider("Invalid food response".into()))?
         } else {
-            let aad = format!("{user_id}:{connector}");
+            let aad = self.credential_aad(user_id, connector).await?;
             let stored: Vec<u8> = conn
                 .try_get("access_ciphertext")
                 .map_err(|_| FreshConnectionError::Unauthorized)?;
@@ -1408,7 +1675,7 @@ impl FreshConnectionsService {
         let complete = list.len() <= limit && !matches!(connector, "swiggy" | "zomato");
         list.truncate(limit);
         let mut tx = self.pool.begin().await?;
-        let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND assistant_read AND authorization_state='authorized' FOR UPDATE").bind(id).bind(user_id).bind(conn.get::<Uuid,_>("generation")).bind(conn.get::<Uuid,_>("lease_token")).fetch_optional(&mut *tx).await?;
+        let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_context_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND assistant_read AND authorization_state='authorized' FOR UPDATE").bind(id).bind(user_id).bind(conn.get::<Uuid,_>("generation")).bind(conn.get::<Uuid,_>("lease_token")).fetch_optional(&mut *tx).await?;
         if valid.is_none() {
             return Err(FreshConnectionError::Unauthorized);
         }
@@ -1443,7 +1710,7 @@ impl FreshConnectionsService {
         id: Uuid,
     ) -> Result<sqlx::postgres::PgRow, FreshConnectionError> {
         self.cipher()?;
-        sqlx::query("UPDATE vox_connections SET lease_token=$3, lease_until=now()+interval '15 minutes' WHERE id=$1 AND user_id=$2 AND authorization_state='authorized' AND sync_timeline AND consented_at IS NOT NULL AND (lease_until IS NULL OR lease_until<=now()) RETURNING *")
+        sqlx::query("UPDATE vox_connections SET lease_token=$3, lease_until=now()+interval '15 minutes' WHERE id=$1 AND user_context_id=$2 AND authorization_state='authorized' AND sync_timeline AND consented_at IS NOT NULL AND (lease_until IS NULL OR lease_until<=now()) RETURNING *")
             .bind(id).bind(user_id).bind(Uuid::new_v4()).fetch_optional(&self.pool).await?.ok_or_else(|| FreshConnectionError::Invalid("Connection paused, unavailable, or already syncing".into()))
     }
     async fn validate_commit(
@@ -1453,7 +1720,7 @@ impl FreshConnectionsService {
         id: Uuid,
         claimed: &sqlx::postgres::PgRow,
     ) -> Result<(), FreshConnectionError> {
-        let valid: Option<Uuid> = sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND authorization_state='authorized' AND sync_timeline AND consented_at IS NOT NULL FOR UPDATE")
+        let valid: Option<Uuid> = sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_context_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND authorization_state='authorized' AND sync_timeline AND consented_at IS NOT NULL FOR UPDATE")
             .bind(id).bind(user_id).bind(claimed.get::<Uuid,_>("generation")).bind(claimed.get::<Uuid,_>("lease_token")).fetch_optional(&mut **tx).await?;
         if valid.is_none() {
             return Err(FreshConnectionError::Unauthorized);
@@ -1495,8 +1762,8 @@ impl FreshConnectionsService {
             .bind(format!("setup:{user_id}:{connector}"))
             .execute(&mut *tx)
             .await?;
-        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL WHERE user_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')").bind(user_id).bind(connector).execute(&mut *tx).await?;
-        let setup_id=sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES($1,$2,$3,$4,$5,now()) RETURNING id").bind(user_id).bind(connector).bind(state).bind(sealed).bind(redirect).fetch_one(&mut *tx).await?;
+        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL WHERE user_context_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')").bind(user_id).bind(connector).execute(&mut *tx).await?;
+        let setup_id=sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,user_context_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1,$2,$3,$4,$5,now()) RETURNING id").bind(user_id).bind(connector).bind(state).bind(sealed).bind(redirect).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok(StartConnectionResponse {
             setup_id: Some(setup_id),
@@ -1516,7 +1783,7 @@ impl FreshConnectionsService {
                 "Provider disabled".into(),
             ));
         }
-        let setup=sqlx::query("UPDATE vox_connection_setups SET status='exchanging' WHERE connector_id=$1 AND state_token=$2 AND status='pending' AND expires_at>now() AND consented_at IS NOT NULL RETURNING *").bind(connector).bind(state).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
+        let setup=sqlx::query("UPDATE vox_connection_setups SET status='exchanging' WHERE connector_id=$1 AND state_token=$2 AND user_context_id IS NOT NULL AND status='pending' AND expires_at>now() AND consented_at IS NOT NULL RETURNING *").bind(connector).bind(state).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
         let result = self
             .complete_personal_callback(connector, code, state, &setup)
             .await;
@@ -1532,7 +1799,7 @@ impl FreshConnectionsService {
         state: &str,
         setup: &sqlx::postgres::PgRow,
     ) -> Result<Uuid, FreshConnectionError> {
-        let user_id: Uuid = setup.get("user_id");
+        let user_id: Uuid = setup.get("user_context_id");
         let setup_id: Uuid = setup.get("id");
         let redirect: String = setup.get("redirect_uri");
         let stored: Vec<u8> = setup.get("verifier_ciphertext");
@@ -1545,7 +1812,7 @@ impl FreshConnectionsService {
             token: tokens.access_token,
         };
         let snapshot = self.personal.snapshot(connector, &access).await?;
-        let aad = format!("{user_id}:{connector}");
+        let aad = self.credential_aad(user_id, connector).await?;
         let sealed = self.cipher()?.seal(
             aad.as_bytes(),
             &serde_json::to_string(&access).map_err(|_| FreshConnectionError::Crypto)?,
@@ -1566,10 +1833,16 @@ impl FreshConnectionsService {
         if valid.is_none() {
             return Err(FreshConnectionError::Unauthorized);
         }
-        let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,account_id,account_display_id,access_ciphertext,refresh_ciphertext,access_expires_at,authorization_state,sync_timeline,assistant_read,metadata,consented_at) VALUES($1,$2,$3,$4,$5,$6,$7,'authorized',true,true,$8,now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),credential_generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,account_id=EXCLUDED.account_id,account_display_id=EXCLUDED.account_display_id,access_ciphertext=EXCLUDED.access_ciphertext,refresh_ciphertext=EXCLUDED.refresh_ciphertext,access_expires_at=EXCLUDED.access_expires_at,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),failure_code=NULL,failure_count=0,updated_at=now() RETURNING id")
+        let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,user_context_id,connector_id,account_id,account_display_id,access_ciphertext,refresh_ciphertext,access_expires_at,authorization_state,sync_timeline,assistant_read,metadata,consented_at) VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1,$2,$3,$4,$5,$6,$7,'authorized',true,true,$8,now()) ON CONFLICT (user_context_id, connector_id) DO UPDATE SET generation=gen_random_uuid(),credential_generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,account_id=EXCLUDED.account_id,account_display_id=EXCLUDED.account_display_id,access_ciphertext=EXCLUDED.access_ciphertext,refresh_ciphertext=EXCLUDED.refresh_ciphertext,access_expires_at=EXCLUDED.access_expires_at,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),failure_code=NULL,failure_count=0,updated_at=now() RETURNING id")
             .bind(user_id).bind(connector).bind(&snapshot.account_id).bind(&snapshot.display_id).bind(sealed).bind(refresh).bind(Utc::now()+Duration::seconds(tokens.expires_in)).bind(json!({"auth_type":"oauth2","snapshot":snapshot.context})).fetch_one(&mut *tx).await?;
         self.ingestor
-            .personal_activity(&mut tx, user_id, id, connector, &snapshot.activities)
+            .personal_activity(
+                &mut tx,
+                self.owner(user_id).await?,
+                id,
+                connector,
+                &snapshot.activities,
+            )
             .await?;
         sqlx::query("UPDATE vox_connections SET last_synced_at=now(),next_sync_at=now()+interval '15 minutes' WHERE id=$1").bind(id).execute(&mut *tx).await?;
         sqlx::query("UPDATE vox_connection_setups SET status='authorized',connection_id=$2,verifier_ciphertext=NULL WHERE id=$1").bind(setup_id).bind(id).execute(&mut *tx).await?;
@@ -1586,7 +1859,7 @@ impl FreshConnectionsService {
         if conn.get::<String, _>("connector_id") != connector || !self.personal.enabled(connector) {
             return Err(FreshConnectionError::Unauthorized);
         }
-        let aad = format!("{user_id}:{connector}");
+        let aad = self.credential_aad(user_id, connector).await?;
         let stored: Vec<u8> = conn
             .try_get("access_ciphertext")
             .map_err(|_| FreshConnectionError::Unauthorized)?;
@@ -1654,7 +1927,7 @@ impl FreshConnectionsService {
         }
         Ok(snapshot)
     }
-    pub async fn sync_personal(
+    pub(crate) async fn sync_personal_in_context(
         &self,
         user_id: Uuid,
         id: Uuid,
@@ -1681,18 +1954,24 @@ impl FreshConnectionsService {
         self.validate_commit(&mut tx, user_id, id, conn).await?;
         let count = self
             .ingestor
-            .personal_activity(&mut tx, user_id, id, connector, &snapshot.activities)
+            .personal_activity(
+                &mut tx,
+                self.owner(user_id).await?,
+                id,
+                connector,
+                &snapshot.activities,
+            )
             .await?;
         sqlx::query("UPDATE vox_connections SET metadata=jsonb_set(metadata,'{snapshot}',$2),last_synced_at=now(),next_sync_at=now()+interval '15 minutes',lease_token=NULL,lease_until=NULL,failure_count=0,failure_code=NULL,updated_at=now() WHERE id=$1").bind(id).bind(snapshot.context).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(count)
     }
-    pub async fn read_personal(
+    pub(crate) async fn read_personal_in_context(
         &self,
         user_id: Uuid,
         id: Uuid,
     ) -> Result<Value, FreshConnectionError> {
-        let conn=sqlx::query("UPDATE vox_connections SET lease_token=$3,lease_until=now()+interval '15 minutes' WHERE id=$1 AND user_id=$2 AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL AND connector_id IN ('spotify','youtube','youtube_history') AND (lease_until IS NULL OR lease_until<=now()) RETURNING *").bind(id).bind(user_id).bind(Uuid::new_v4()).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
+        let conn=sqlx::query("UPDATE vox_connections SET lease_token=$3,lease_until=now()+interval '15 minutes' WHERE id=$1 AND user_context_id=$2 AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL AND connector_id IN ('spotify','youtube','youtube_history') AND (lease_until IS NULL OR lease_until<=now()) RETURNING *").bind(id).bind(user_id).bind(Uuid::new_v4()).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
         let result = self.read_personal_claimed(user_id, id, &conn).await;
         if let Err(ref error) = result {
             self.release_failure(id, &conn, error).await?;
@@ -1730,13 +2009,13 @@ impl FreshConnectionsService {
         id: Uuid,
         conn: &sqlx::postgres::PgRow,
     ) -> Result<(), FreshConnectionError> {
-        let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL FOR UPDATE").bind(id).bind(user_id).bind(conn.get::<Uuid,_>("generation")).bind(conn.get::<Uuid,_>("lease_token")).fetch_optional(&mut **tx).await?;
+        let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_context_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL FOR UPDATE").bind(id).bind(user_id).bind(conn.get::<Uuid,_>("generation")).bind(conn.get::<Uuid,_>("lease_token")).fetch_optional(&mut **tx).await?;
         if valid.is_none() {
             return Err(FreshConnectionError::Unauthorized);
         }
         Ok(())
     }
-    pub async fn import_youtube_history(
+    pub(crate) async fn import_youtube_history_in_context(
         &self,
         user_id: Uuid,
         history: Value,
@@ -1758,10 +2037,16 @@ impl FreshConnectionsService {
             .bind(format!("setup:{user_id}:youtube_history"))
             .execute(&mut *tx)
             .await?;
-        let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,account_id,account_display_id,authorization_state,sync_timeline,assistant_read,metadata,consented_at,last_synced_at) VALUES($1,'youtube_history',$2,'Google Takeout watch history','authorized',true,true,$3,now(),now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),last_synced_at=now(),updated_at=now() RETURNING id").bind(user_id).bind(user_id.to_string()).bind(json!({"auth_type":"import","snapshot":{"watch_history":items.iter().rev().take(100).collect::<Vec<_>>(),"source":"google_takeout","complete":false}})).fetch_one(&mut *tx).await?;
+        let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,user_context_id,connector_id,account_id,account_display_id,authorization_state,sync_timeline,assistant_read,metadata,consented_at,last_synced_at) VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1,'youtube_history',$2,'Google Takeout watch history','authorized',true,true,$3,now(),now()) ON CONFLICT (user_context_id, connector_id) DO UPDATE SET generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),last_synced_at=now(),updated_at=now() RETURNING id").bind(user_id).bind(user_id.to_string()).bind(json!({"auth_type":"import","snapshot":{"watch_history":items.iter().rev().take(100).collect::<Vec<_>>(),"source":"google_takeout","complete":false}})).fetch_one(&mut *tx).await?;
         let imported = self
             .ingestor
-            .personal_activity(&mut tx, user_id, id, "youtube_history", &items)
+            .personal_activity(
+                &mut tx,
+                self.owner(user_id).await?,
+                id,
+                "youtube_history",
+                &items,
+            )
             .await?;
         tx.commit().await?;
         Ok(json!({"imported":imported,"skipped":skipped,"complete":false,"connection_id":id}))
@@ -1769,8 +2054,8 @@ impl FreshConnectionsService {
 
     pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError> {
         let rows = sqlx::query(
-            "SELECT id, user_id, connector_id FROM vox_connections \
-             WHERE authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() AND (lease_until IS NULL OR lease_until <= now()) AND connector_id IN ('google_calendar','playstation','swiggy','zomato','spotify','youtube') ORDER BY next_sync_at \
+            "SELECT id, user_context_id, connector_id FROM vox_connections \
+             WHERE user_context_id IS NOT NULL AND authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() AND (lease_until IS NULL OR lease_until <= now()) AND connector_id IN ('google_calendar','playstation','swiggy','zomato','spotify','youtube') ORDER BY next_sync_at \
              LIMIT 20",
         )
         .fetch_all(&self.pool)
@@ -1778,13 +2063,13 @@ impl FreshConnectionsService {
 
         for r in rows {
             let id: Uuid = r.get("id");
-            let user_id: Uuid = r.get("user_id");
+            let user_id: Uuid = r.get("user_context_id");
             let connector_id: String = r.get("connector_id");
 
             let result = match connector_id.as_str() {
-                "google_calendar" => self.refresh(user_id, id).await.map(|_| ()),
+                "google_calendar" => self.refresh_in_context(user_id, id).await.map(|_| ()),
                 "playstation" | "swiggy" | "zomato" | "spotify" | "youtube" => {
-                    self.refresh(user_id, id).await.map(|_| ())
+                    self.refresh_in_context(user_id, id).await.map(|_| ())
                 }
                 _ => Ok(()),
             };
