@@ -920,7 +920,7 @@ impl FreshConnectionsService {
         snapshots = crate::providers::observations::checkpoint(&snapshots, &games, now);
 
         sqlx::query(
-            "UPDATE vox_connections SET access_ciphertext = $1, refresh_ciphertext = $2, access_expires_at = $3, metadata = $4, last_synced_at = now(), next_sync_at = now() + interval '10 minutes', failure_code = NULL, failure_count = 0, lease_token=NULL, lease_until=NULL, updated_at = now() WHERE id = $5"
+            "UPDATE vox_connections SET access_ciphertext = $1, refresh_ciphertext = $2, access_expires_at = $3, metadata = $4, last_synced_at = now(), next_sync_at = now() + interval '30 minutes', failure_code = NULL, failure_count = 0, lease_token=NULL, lease_until=NULL, updated_at = now() WHERE id = $5"
         )
         .bind(access_cipher)
         .bind(refresh_cipher)
