@@ -55,6 +55,15 @@ pub struct FoodDeliveryOrder {
     pub items: Vec<String>,
     pub provider_data: Value,
 }
+impl FoodDeliveryOrder {
+    pub fn provider_label(&self) -> &'static str {
+        match self.provider.as_str() {
+            "swiggy" => super::swiggy::LABEL,
+            "zomato" => super::zomato::LABEL,
+            _ => "Food delivery",
+        }
+    }
+}
 #[derive(Debug, thiserror::Error)]
 pub enum FoodDeliveryError {
     #[error("Food provider request failed: {0}")]
@@ -68,79 +77,30 @@ pub enum FoodDeliveryError {
 }
 
 #[derive(Clone)]
-pub struct SwiggyClient {
-    pub(crate) client: Client,
-}
-impl SwiggyClient {
-    pub fn new(http: reqwest::Client) -> Self {
-        Self {
-            client: Client::new(http, "swiggy"),
-        }
-    }
-    pub async fn fetch_orders(
-        &self,
-        token: &str,
-    ) -> Result<Vec<FoodDeliveryOrder>, FoodDeliveryError> {
-        self.client.fetch_orders(token).await
-    }
-    #[cfg(test)]
-    fn parse_swiggy_order(v: &Value) -> Option<FoodDeliveryOrder> {
-        parse_order(v, "swiggy")
-    }
-}
-#[derive(Clone)]
-pub struct ZomatoClient {
-    pub(crate) client: Client,
-}
-impl ZomatoClient {
-    pub fn new(http: reqwest::Client) -> Self {
-        Self {
-            client: Client::new(http, "zomato"),
-        }
-    }
-    pub async fn fetch_orders(
-        &self,
-        token: &str,
-    ) -> Result<Vec<FoodDeliveryOrder>, FoodDeliveryError> {
-        self.client.fetch_orders(token).await
-    }
-    #[cfg(test)]
-    fn parse_zomato_order(v: &Value) -> Option<FoodDeliveryOrder> {
-        parse_order(v, "zomato")
-    }
-}
-
-#[derive(Clone)]
 pub(crate) struct Client {
     pub(crate) http: reqwest::Client,
     pub(crate) provider: &'static str,
     pub(crate) endpoint: String,
     pub(crate) auth_base: String,
     pub(crate) enabled: bool,
+    pub(crate) form_tokens: bool,
 }
 impl Client {
-    fn new(http: reqwest::Client, provider: &'static str) -> Self {
-        let endpoint = match provider {
-            "swiggy" => "https://mcp.swiggy.com/food",
-            _ => "https://mcp-server.zomato.com/mcp",
-        };
-        let auth_base = if provider == "swiggy" {
-            "https://mcp.swiggy.com/auth"
-        } else {
-            "https://mcp-server.zomato.com"
-        };
-        let enabled = std::env::var(if provider == "swiggy" {
-            "SWIGGY_MCP_ENABLED"
-        } else {
-            "ZOMATO_MCP_ENABLED"
-        })
-        .is_ok_and(|v| v == "true");
+    pub(crate) fn new(
+        http: reqwest::Client,
+        provider: &'static str,
+        endpoint: &str,
+        auth_base: &str,
+        enabled_var: &str,
+        form_tokens: bool,
+    ) -> Self {
         Self {
             http,
             provider,
             endpoint: endpoint.into(),
             auth_base: auth_base.into(),
-            enabled,
+            enabled: std::env::var(enabled_var).is_ok_and(|v| v == "true"),
+            form_tokens,
         }
     }
     pub(crate) async fn fetch_orders(
@@ -148,96 +108,18 @@ impl Client {
         token: &str,
     ) -> Result<Vec<FoodDeliveryOrder>, FoodDeliveryError> {
         let mut session = Session::connect(self, token).await?;
-        let mut orders = Vec::new();
-        if self.provider == "swiggy" {
-            let mut addresses = Vec::new();
-            for page in 1..=20 {
-                let data = session
-                    .call("get_addresses", json!({"page":page,"pageSize":10}))
-                    .await?;
-                let batch = data
-                    .get("addresses")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| FoodDeliveryError::Parse("missing addresses array".into()))?;
-                addresses.extend(batch.iter().cloned());
-                let more = data
-                    .pointer("/pagination/hasMore")
-                    .and_then(Value::as_bool)
-                    .ok_or_else(|| FoodDeliveryError::Parse("missing address pagination".into()))?;
-                if !more {
-                    break;
-                }
-                if page == 20 {
-                    return Err(FoodDeliveryError::Parse(
-                        "address pagination limit exceeded".into(),
-                    ));
-                }
-            }
-            for address in addresses {
-                let id = string_field(&address, &["id", "addressId", "address_id"])
-                    .ok_or_else(|| FoodDeliveryError::Parse("missing address ID".into()))?;
-                let data = session
-                    .call("get_food_orders", json!({"addressId": id}))
-                    .await?;
-                orders.extend(parse_orders(&data, self.provider)?);
-            }
-            if orders.iter().any(|o| {
-                o.status.is_active()
-                    || o.provider_data
-                        .get("isActiveOrder")
-                        .and_then(Value::as_bool)
-                        == Some(true)
-            }) {
-                let data = session.call("track_food_order", json!({})).await?;
-                let tracked = data
-                    .get("orders")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| FoodDeliveryError::Parse("missing tracking orders".into()))?;
-                for tracking in tracked {
-                    let id = string_field(tracking, &["orderId", "order_id"]).ok_or_else(|| {
-                        FoodDeliveryError::Parse("missing tracking order ID".into())
-                    })?;
-                    if let Some(order) = orders.iter_mut().find(|o| o.order_id == id) {
-                        order.status = parse_status(tracking);
-                        order.provider_data["tracking"] = tracking.clone();
-                    }
-                }
-            }
+        let mut orders = if self.provider == "swiggy" {
+            super::swiggy::read_orders(&mut session).await?
         } else {
-            let tools = session.rpc("tools/list", json!({})).await?;
-            let tools = tools
-                .get("tools")
-                .and_then(Value::as_array)
-                .ok_or_else(|| FoodDeliveryError::Parse("missing tool catalogue".into()))?;
-            let tool = tools
-                .iter()
-                .find(|t| {
-                    matches!(
-                        t.get("name").and_then(Value::as_str),
-                        Some("get_orders" | "get_order_history" | "get_recent_orders")
-                    ) && t
-                        .pointer("/annotations/readOnlyHint")
-                        .and_then(Value::as_bool)
-                        == Some(true)
-                        && t.pointer("/inputSchema/required")
-                            .and_then(Value::as_array)
-                            .is_none_or(Vec::is_empty)
-                })
-                .ok_or_else(|| {
-                    FoodDeliveryError::Parse(
-                        "Zomato has not exposed a supported read-only history tool".into(),
-                    )
-                })?;
-            let name = tool.get("name").and_then(Value::as_str).unwrap();
-            orders = parse_orders(&session.call(name, json!({})).await?, self.provider)?;
-        }
+            super::zomato::read_orders(&mut session).await?
+        };
         let mut seen = HashSet::new();
         orders.retain(|o| seen.insert(o.order_id.clone()));
         Ok(orders)
     }
 }
 
-struct Session<'a> {
+pub(crate) struct Session<'a> {
     client: &'a Client,
     token: &'a str,
     id: Option<String>,
@@ -245,7 +127,10 @@ struct Session<'a> {
     next_id: u64,
 }
 impl<'a> Session<'a> {
-    async fn connect(client: &'a Client, token: &'a str) -> Result<Self, FoodDeliveryError> {
+    pub(crate) async fn connect(
+        client: &'a Client,
+        token: &'a str,
+    ) -> Result<Self, FoodDeliveryError> {
         if token.trim().is_empty() {
             return Err(FoodDeliveryError::Unauthorized);
         }
@@ -320,7 +205,11 @@ impl<'a> Session<'a> {
         }
         Err(FoodDeliveryError::Parse("missing JSON-RPC response".into()))
     }
-    async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, FoodDeliveryError> {
+    pub(crate) async fn rpc(
+        &mut self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, FoodDeliveryError> {
         let id = self.next_id;
         self.next_id += 1;
         let reply = self
@@ -338,14 +227,18 @@ impl<'a> Session<'a> {
             .cloned()
             .ok_or_else(|| FoodDeliveryError::Parse("missing result".into()))
     }
-    async fn call(&mut self, name: &str, arguments: Value) -> Result<Value, FoodDeliveryError> {
+    pub(crate) async fn call(
+        &mut self,
+        name: &str,
+        arguments: Value,
+    ) -> Result<Value, FoodDeliveryError> {
         tool_data(
             self.rpc("tools/call", json!({"name":name,"arguments":arguments}))
                 .await?,
         )
     }
 }
-fn decode_rpc(text: &str, id: &Value) -> Result<Option<Value>, FoodDeliveryError> {
+pub(crate) fn decode_rpc(text: &str, id: &Value) -> Result<Option<Value>, FoodDeliveryError> {
     if let Ok(value) = serde_json::from_str::<Value>(text) {
         if &value["id"] == id {
             return Ok(Some(value));
@@ -394,7 +287,7 @@ fn tool_data(result: Value) -> Result<Value, FoodDeliveryError> {
     }
     Ok(value.get("data").cloned().unwrap_or(value))
 }
-fn parse_orders(
+pub(crate) fn parse_orders(
     value: &Value,
     provider: &str,
 ) -> Result<Vec<FoodDeliveryOrder>, FoodDeliveryError> {
@@ -410,7 +303,7 @@ fn parse_orders(
         })
         .collect()
 }
-fn string_field(v: &Value, keys: &[&str]) -> Option<String> {
+pub(crate) fn string_field(v: &Value, keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| {
         v.get(*key).and_then(|value| match value {
             Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
@@ -444,7 +337,7 @@ fn timestamp(v: &Value, keys: &[&str]) -> Option<DateTime<Utc>> {
         }
     })
 }
-fn parse_status(v: &Value) -> FoodDeliveryStatus {
+pub(crate) fn parse_status(v: &Value) -> FoodDeliveryStatus {
     let status = string_field(
         v,
         &["order_status", "delivery_status", "orderStatus", "status"],
@@ -461,7 +354,7 @@ fn parse_status(v: &Value) -> FoodDeliveryStatus {
         _ => FoodDeliveryStatus::Unknown,
     }
 }
-fn parse_order(v: &Value, provider: &str) -> Option<FoodDeliveryOrder> {
+pub(crate) fn parse_order(v: &Value, provider: &str) -> Option<FoodDeliveryOrder> {
     let order_id = string_field(v, &["order_id", "orderId", "id"])?;
     let restaurant_name = string_field(v, &["restaurant_name", "restaurantName", "res_name"])
         .or_else(|| v.get("restaurant").and_then(|r| string_field(r, &["name"])))?;
@@ -521,9 +414,16 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn parse_order_swiggy(v: &Value) -> Option<FoodDeliveryOrder> {
+        parse_order(v, "swiggy")
+    }
+    fn parse_order_zomato(v: &Value) -> Option<FoodDeliveryOrder> {
+        parse_order(v, "zomato")
+    }
+
     #[test]
     fn missing_coordinates_are_not_replaced_with_bengaluru() {
-        let order = SwiggyClient::parse_swiggy_order(&json!({
+        let order = parse_order_swiggy(&json!({
             "order_id":"123", "restaurant_name":"Actual restaurant", "status":"PLACED"
         }))
         .unwrap();
@@ -533,7 +433,7 @@ mod tests {
 
     #[test]
     fn missing_status_is_not_reported_as_delivered() {
-        let order = ZomatoClient::parse_zomato_order(&json!({
+        let order = parse_order_zomato(&json!({
             "order_id":"123", "res_name":"Actual restaurant"
         }))
         .unwrap();
@@ -543,7 +443,7 @@ mod tests {
 
     #[test]
     fn order_timestamp_comes_from_provider_and_is_stable() {
-        let order = SwiggyClient::parse_swiggy_order(&json!({
+        let order = parse_order_swiggy(&json!({
             "order_id":"123", "restaurant_name":"Actual restaurant", "status":"DELIVERED",
             "order_time":"2026-10-01T12:30:00Z", "delivered_time":"2026-10-01T13:00:00Z"
         }))
@@ -562,68 +462,8 @@ mod tests {
 #[cfg(test)]
 mod mcp_tests {
     use super::*;
-    use axum::http::StatusCode;
-    use axum::{Json, Router, routing::post};
+    use serde_json::json;
 
-    async fn server(response: Value) -> (Client, tokio::task::JoinHandle<()>) {
-        let router = Router::new().route("/mcp", post(move |Json(request): Json<Value>| {
-            let response = response.clone();
-            async move {
-                if request["method"] == "notifications/initialized" { return (StatusCode::ACCEPTED, Json(Value::Null)); }
-                let result = if request["method"] == "initialize" { json!({"protocolVersion":"2025-03-26"}) } else if request["params"]["name"] == "get_addresses" {
-                    json!({"structuredContent":{"success":true,"data":{"addresses":[{"id":"home","addressLine":"Provider address","phoneNumber":""}],"pagination":{"hasMore":false}}}})
-                } else { response };
-                (StatusCode::OK, Json(json!({"jsonrpc":"2.0","id":request["id"],"result":result})))
-            }
-        }));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let task = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        let mut client = Client::new(reqwest::Client::new(), "swiggy");
-        client.endpoint = format!("http://{address}/mcp");
-        (client, task)
-    }
-    #[tokio::test]
-    async fn valid_empty_history_stays_empty() {
-        let (client, task) =
-            server(json!({"structuredContent":{"success":true,"data":{"orders":[]}}})).await;
-        assert!(
-            client
-                .fetch_orders("real-test-session")
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        task.abort();
-    }
-    #[tokio::test]
-    async fn malformed_history_is_an_error_instead_of_empty_success() {
-        let (client, task) =
-            server(json!({"structuredContent":{"success":true,"data":{"unexpected":[]}}})).await;
-        assert!(matches!(
-            client.fetch_orders("real-test-session").await,
-            Err(FoodDeliveryError::Parse(_))
-        ));
-        task.abort();
-    }
-    #[tokio::test]
-    async fn history_preserves_provider_values_without_inventing_missing_fields() {
-        let (client, task) = server(json!({"content":[{"type":"text","text":json!({"success":true,"data":{"orders":[{
-            "orderId":"901", "restaurantId":"r1", "restaurantName":"Provider restaurant", "orderTotal":"₹425.50", "orderStatus":"DELIVERED", "orderType":"FOOD", "orderedItems":"2 Dosas", "orderedTime":"2026-09-30T14:00:00+05:30", "isActiveOrder":false, "actions":[]
-        }]}}).to_string()}]})).await;
-        let orders = client.fetch_orders("real-test-session").await.unwrap();
-        assert_eq!(orders.len(), 1);
-        assert_eq!(orders[0].total_amount, Some(425.50));
-        assert_eq!(orders[0].restaurant_location, None);
-        assert_eq!(orders[0].delivered_time, None);
-        assert_eq!(
-            orders[0].order_time.unwrap().to_rfc3339(),
-            "2026-09-30T08:30:00+00:00"
-        );
-        task.abort();
-    }
     #[test]
     fn sse_waits_for_complete_matching_response() {
         let input =

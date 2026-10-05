@@ -83,7 +83,7 @@ impl Client {
     }
     async fn tokens(&self, fields: Value) -> Result<Tokens, FoodDeliveryError> {
         let request = self.http.post(format!("{}/token", self.auth_base()));
-        let request = if self.provider == "swiggy" {
+        let request = if !self.form_tokens {
             request.json(&fields)
         } else {
             let fields: Vec<(&str, &str)> = fields

@@ -147,16 +147,16 @@ pub trait TimelineIngestor: Send + Sync {
 #[derive(Clone)]
 pub struct FreshConnectionsService {
     pool: PgPool,
-    cipher: Option<CredentialCipher>,
+    pub(crate) cipher: Option<CredentialCipher>,
     google: GoogleClient,
     psn: crate::providers::psn::Client,
-    swiggy: crate::providers::food_delivery::SwiggyClient,
-    zomato: crate::providers::food_delivery::ZomatoClient,
+    pub(crate) swiggy: crate::providers::swiggy::SwiggyClient,
+    pub(crate) zomato: crate::providers::zomato::ZomatoClient,
     personal: crate::providers::personal::Client,
     ingestor: std::sync::Arc<dyn TimelineIngestor>,
     google_client_id: Option<String>,
     google_client_secret: Option<String>,
-    core_api_url: Option<String>,
+    pub(crate) core_api_url: Option<String>,
 }
 
 impl FreshConnectionsService {
@@ -183,13 +183,13 @@ impl FreshConnectionsService {
             cipher,
             google: GoogleClient::new(http.clone()),
             psn: crate::providers::psn::Client::new().map_err(map_psn_error)?,
-            swiggy: crate::providers::food_delivery::SwiggyClient::new(http.clone()),
+            swiggy: crate::providers::swiggy::SwiggyClient::new(http.clone()),
             personal: crate::providers::personal::Client::new(
                 http.clone(),
                 google_client_id.clone(),
                 google_client_secret.clone(),
             ),
-            zomato: crate::providers::food_delivery::ZomatoClient::new(http),
+            zomato: crate::providers::zomato::ZomatoClient::new(http),
             ingestor,
             google_client_id,
             google_client_secret,
@@ -221,22 +221,8 @@ impl FreshConnectionsService {
                 auth_type: "npsso".to_string(),
                 available: self.cipher.is_some(),
             },
-            ConnectorDescriptor {
-                id: "swiggy".to_string(),
-                name: "Swiggy".to_string(),
-                description: "Read real food orders and delivery status through Swiggy account authorization.".to_string(),
-                supported_features: vec!["timeline_sync".to_string(), "assistant_read".to_string()],
-                auth_type: "oauth2".to_string(),
-                available: self.cipher.is_some() && self.core_api_url.is_some() && self.swiggy.client.enabled(),
-            },
-            ConnectorDescriptor {
-                id: "zomato".to_string(),
-                name: "Zomato".to_string(),
-                description: "Read food orders through an approved Zomato account integration.".to_string(),
-                supported_features: vec!["timeline_sync".to_string(), "assistant_read".to_string()],
-                auth_type: "oauth2".to_string(),
-                available: self.cipher.is_some() && self.core_api_url.is_some() && self.zomato.client.enabled(),
-            },
+            self.swiggy_descriptor(),
+            self.zomato_descriptor(),
         ];
         for (id, name, description) in [
             (
@@ -1101,21 +1087,7 @@ impl FreshConnectionsService {
         self.ingestor.food_committed(user_id, &orders);
         Ok(id)
     }
-    pub async fn sync_swiggy(
-        &self,
-        user_id: Uuid,
-        id: Uuid,
-    ) -> Result<usize, FreshConnectionError> {
-        self.sync_food(user_id, id, "swiggy").await
-    }
-    pub async fn sync_zomato(
-        &self,
-        user_id: Uuid,
-        id: Uuid,
-    ) -> Result<usize, FreshConnectionError> {
-        self.sync_food(user_id, id, "zomato").await
-    }
-    async fn sync_food(
+    pub(crate) async fn sync_food(
         &self,
         user_id: Uuid,
         id: Uuid,
