@@ -18,7 +18,7 @@ Descriptors fail closed when encryption, callback base URL, or the required cred
 
 ## Supported records
 
-Spotify imports the latest 50 provider playback records, keyed by verified account, track, and `played_at`. Track duration is metadata, never an invented playback end. Playlists are read as a current snapshot. Synchronization runs on the existing worker every 15 minutes; these records are explicitly a limited provider window, not a complete historical export.
+Spotify imports the latest 50 provider playback records, keyed by verified account, track, and `played_at`. Track duration is metadata, never an invented playback end. Only the `user-read-recently-played` scope is requested; playlists and podcasts are not read. Synchronization runs on the existing worker every 15 minutes; these records are explicitly a limited provider window, not a complete historical export.
 
 YouTube API synchronization reads up to 200 playlists and subscriptions, then up to 20 playlists plus the liked-videos playlist with at most 200 entries each. A playlist item's `snippet.publishedAt` represents the playlist addition/like, never a watch time or video upload time. Subscriptions remain a snapshot. Responses explicitly report incomplete coverage and no API watch history.
 

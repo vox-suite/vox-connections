@@ -122,7 +122,7 @@ impl Client {
         match connector {
             "spotify" => {
                 query
-                    .append_pair("scope", "user-read-recently-played user-read-private playlist-read-private playlist-read-collaborative")
+                    .append_pair("scope", "user-read-recently-played")
                     .append_pair("code_challenge_method", "S256")
                     .append_pair("code_challenge", &crate::crypto::pkce_challenge(verifier));
             }
@@ -275,18 +275,12 @@ impl Client {
                         &access.token,
                     )
                     .await?;
-                let playlists = self
-                    .get(
-                        "https://api.spotify.com/v1/me/playlists?limit=50",
-                        &access.token,
-                    )
-                    .await?;
                 let activities = parse_spotify(&account, &data)?;
                 Ok(Snapshot {
                     account_id: account,
                     display_id: profile["display_name"].as_str().map(str::to_owned),
                     activities,
-                    context: json!({"recently_played":data["items"],"playlists":playlists["items"],"complete":false,"history_window":"latest_50_provider_records"}),
+                    context: json!({"recently_played":data["items"],"complete":false,"history_window":"latest_50_provider_records"}),
                 })
             }
             "youtube" => {

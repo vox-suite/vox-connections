@@ -1128,7 +1128,6 @@ async fn personal_fixture() -> (
                 "/youtube/v3/subscriptions" => json!({"items":[{"id":"subscription","snippet":{"title":"Subscribed channel","publishedAt":"2026-01-01T00:00:00Z"}}]}),
                 "/youtube/v3/playlistItems" => json!({"items":[{"id":"playlist-item","snippet":{"title":"Video","publishedAt":"2026-01-02T00:00:00Z","resourceId":{"videoId":"abcdefghijk"}},"contentDetails":{"videoPublishedAt":"2020-01-01T00:00:00Z"}}]}),
 
-            "/v1/me/playlists"=>json!({"items":[{"id":"playlist","name":"Mix"}]}),
             "/v1/me/player/recently-played"=>json!({"items":[{"played_at":"2026-01-01T12:00:00Z","track":{"id":"track","name":"Song","duration_ms":300000}}]}),
             _=>panic!("Unexpected personal provider endpoint {path}")
         }; axum::Json(response)
