@@ -108,6 +108,15 @@ pub trait TimelineIngestor: Send + Sync {
         connection_id: Uuid,
         activities: &[crate::providers::observations::ObservedActivity],
     ) -> Result<usize, FreshConnectionError>;
+    async fn game_history(
+        &self,
+        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _user_id: Uuid,
+        _connection_id: Uuid,
+        _games: &[PlayStationGame],
+    ) -> Result<usize, FreshConnectionError> {
+        Ok(0)
+    }
     async fn food_order(
         &self,
         _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -914,6 +923,10 @@ impl FreshConnectionsService {
             self.ingestor
                 .gaming(&mut tx, user_id, connection_id, &activities)
                 .await?
+                + self
+                    .ingestor
+                    .game_history(&mut tx, user_id, connection_id, &games)
+                    .await?
         } else {
             0
         };
