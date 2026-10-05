@@ -1789,8 +1789,8 @@ impl FreshConnectionsService {
                 _ => Ok(()),
             };
 
-            if result.is_err() {
-                tracing::warn!(connection_id=%id, "connection sync did not complete");
+            if let Err(error) = &result {
+                tracing::warn!(connection_id=%id, connector=%connector_id, error=%error, "connection sync did not complete");
             }
         }
 
