@@ -7,3 +7,7 @@ Configure `VOX_CREDENTIAL_KEY` as 64 hexadecimal characters. Missing configurati
 Native clients use authenticated Core `/v1/me/connectors` and `/v1/me/connections` APIs. Linking requires consent to timeline synchronization and assistant reads. Either use can be paused independently. Disconnect deletes credentials and retains imported spans. Calendar fields are provider-owned; local notes and collections remain editable. Gaming imports represent observed lifetime-counter increases with unknown session times.
 
 Steam, Valorant, Amazon shopper data and Zomato tracking are outside this release. Release requires isolated database tests, native builds and real account linking/sync on both providers. Passing local checks alone does not validate a deployment or provider account.
+
+Swiggy and Zomato OAuth integration work is opt-in and requires approved provider access. See [food connection setup and verification](docs/food-connections.md). It is not a live-verified release capability.
+
+Spotify and YouTube configuration, supported data and service contracts: [personal integrations](docs/personal-integrations.md).

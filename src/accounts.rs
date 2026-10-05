@@ -117,6 +117,31 @@ pub trait TimelineIngestor: Send + Sync {
     ) -> Result<usize, FreshConnectionError> {
         Ok(0)
     }
+    async fn food_order(
+        &self,
+        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _user_id: Uuid,
+        _connection_id: Uuid,
+        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],
+    ) -> Result<usize, FreshConnectionError> {
+        Ok(0)
+    }
+    async fn personal_activity(
+        &self,
+        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _user_id: Uuid,
+        _connection_id: Uuid,
+        _connector: &str,
+        _items: &[crate::providers::personal::PersonalActivity],
+    ) -> Result<usize, FreshConnectionError> {
+        Ok(0)
+    }
+    fn food_committed(
+        &self,
+        _user_id: Uuid,
+        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],
+    ) {
+    }
 }
 
 #[derive(Clone)]
@@ -125,6 +150,9 @@ pub struct FreshConnectionsService {
     cipher: Option<CredentialCipher>,
     google: GoogleClient,
     psn: crate::providers::psn::Client,
+    swiggy: crate::providers::food_delivery::SwiggyClient,
+    zomato: crate::providers::food_delivery::ZomatoClient,
+    personal: crate::providers::personal::Client,
     ingestor: std::sync::Arc<dyn TimelineIngestor>,
     google_client_id: Option<String>,
     google_client_secret: Option<String>,
@@ -153,8 +181,15 @@ impl FreshConnectionsService {
         Ok(Self {
             pool,
             cipher,
-            google: GoogleClient::new(http),
+            google: GoogleClient::new(http.clone()),
             psn: crate::providers::psn::Client::new().map_err(map_psn_error)?,
+            swiggy: crate::providers::food_delivery::SwiggyClient::new(http.clone()),
+            personal: crate::providers::personal::Client::new(
+                http.clone(),
+                google_client_id.clone(),
+                google_client_secret.clone(),
+            ),
+            zomato: crate::providers::food_delivery::ZomatoClient::new(http),
             ingestor,
             google_client_id,
             google_client_secret,
@@ -169,7 +204,7 @@ impl FreshConnectionsService {
     }
 
     pub fn list_connectors(&self) -> Vec<ConnectorDescriptor> {
-        vec![
+        let mut descriptors = vec![
             ConnectorDescriptor {
                 id: "google_calendar".to_string(),
                 name: "Google Calendar".to_string(),
@@ -186,7 +221,47 @@ impl FreshConnectionsService {
                 auth_type: "npsso".to_string(),
                 available: self.cipher.is_some(),
             },
-        ]
+            ConnectorDescriptor {
+                id: "swiggy".to_string(),
+                name: "Swiggy".to_string(),
+                description: "Read real food orders and delivery status through Swiggy account authorization.".to_string(),
+                supported_features: vec!["timeline_sync".to_string(), "assistant_read".to_string()],
+                auth_type: "oauth2".to_string(),
+                available: self.cipher.is_some() && self.core_api_url.is_some() && self.swiggy.client.enabled(),
+            },
+            ConnectorDescriptor {
+                id: "zomato".to_string(),
+                name: "Zomato".to_string(),
+                description: "Read food orders through an approved Zomato account integration.".to_string(),
+                supported_features: vec!["timeline_sync".to_string(), "assistant_read".to_string()],
+                auth_type: "oauth2".to_string(),
+                available: self.cipher.is_some() && self.core_api_url.is_some() && self.zomato.client.enabled(),
+            },
+        ];
+        for (id, name, description) in [
+            (
+                "spotify",
+                "Spotify",
+                "Recently played music with provider playback timestamps.",
+            ),
+            (
+                "youtube",
+                "YouTube",
+                "Read playlists, likes and subscriptions. Watch history requires a Google Takeout import.",
+            ),
+        ] {
+            descriptors.push(ConnectorDescriptor {
+                id: id.into(),
+                name: name.into(),
+                description: description.into(),
+                supported_features: vec!["timeline_sync".into(), "assistant_read".into()],
+                auth_type: "oauth2".into(),
+                available: self.cipher.is_some()
+                    && self.core_api_url.is_some()
+                    && self.personal.enabled(id),
+            });
+        }
+        descriptors
     }
 
     pub async fn list_connections(
@@ -350,6 +425,8 @@ impl FreshConnectionsService {
                     status: "authorized".to_string(),
                 })
             }
+            "spotify" | "youtube" => self.start_personal_oauth(user_id, &req.connector_id).await,
+            "swiggy" | "zomato" => self.start_food_oauth(user_id, &req.connector_id).await,
             other => Err(FreshConnectionError::Invalid(format!(
                 "Unknown connector '{other}'"
             ))),
@@ -436,6 +513,29 @@ impl FreshConnectionsService {
             }
             "playstation" => {
                 let count = self.sync_playstation(user_id, connection_id).await?;
+                Ok(RefreshResponse {
+                    refreshed: true,
+                    spans_created: count,
+                })
+            }
+            "swiggy" => {
+                let count = self.sync_swiggy(user_id, connection_id).await?;
+                Ok(RefreshResponse {
+                    refreshed: true,
+                    spans_created: count,
+                })
+            }
+            "zomato" => {
+                let count = self.sync_zomato(user_id, connection_id).await?;
+                Ok(RefreshResponse {
+                    refreshed: true,
+                    spans_created: count,
+                })
+            }
+            "spotify" | "youtube" => {
+                let count = self
+                    .sync_personal(user_id, connection_id, &connector_id)
+                    .await?;
                 Ok(RefreshResponse {
                     refreshed: true,
                     spans_created: count,
@@ -862,6 +962,269 @@ impl FreshConnectionsService {
         Ok(spans_created)
     }
 
+    fn food_client(
+        &self,
+        connector: &str,
+    ) -> Result<&crate::providers::food_delivery::Client, FreshConnectionError> {
+        match connector {
+            "swiggy" => Ok(&self.swiggy.client),
+            "zomato" => Ok(&self.zomato.client),
+            _ => Err(FreshConnectionError::NotFound),
+        }
+    }
+    async fn start_food_oauth(
+        &self,
+        user_id: Uuid,
+        connector: &str,
+    ) -> Result<StartConnectionResponse, FreshConnectionError> {
+        let client = self.food_client(connector)?;
+        if !client.enabled() {
+            return Err(FreshConnectionError::NotConfigured(
+                "Provider access and callback approval are required".into(),
+            ));
+        }
+        let redirect = self
+            .google_redirect()?
+            .replace("/google/callback", &format!("/{connector}/callback"));
+        let client_id = client.register(&redirect).await.map_err(map_food_error)?;
+        let state = crate::crypto::random_token()?;
+        let verifier = crate::crypto::random_token()?;
+        let auth_url = client.auth_url(&client_id, &redirect, &state, &verifier);
+        let credentials = serde_json::to_string(&crate::providers::food_oauth::SetupCredentials {
+            verifier,
+            client_id,
+        })
+        .map_err(|_| FreshConnectionError::Crypto)?;
+        let sealed = self.cipher()?.seal(state.as_bytes(), &credentials)?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("setup:{user_id}:{connector}"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL WHERE user_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')")
+            .bind(user_id).bind(connector).execute(&mut *tx).await?;
+        let id: Uuid = sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES($1,$2,$3,$4,$5,now()) RETURNING id")
+            .bind(user_id).bind(connector).bind(&state).bind(sealed).bind(redirect).fetch_one(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(StartConnectionResponse {
+            setup_id: Some(id),
+            connection_id: None,
+            authorization_url: Some(auth_url),
+            status: "pending".into(),
+        })
+    }
+    pub async fn handle_food_callback(
+        &self,
+        connector: &str,
+        code: Option<&str>,
+        state: &str,
+    ) -> Result<Uuid, FreshConnectionError> {
+        let client = self.food_client(connector)?;
+        if !client.enabled() {
+            return Err(FreshConnectionError::NotConfigured(
+                "Provider disabled".into(),
+            ));
+        }
+        let setup = sqlx::query("UPDATE vox_connection_setups SET status='exchanging' WHERE connector_id=$1 AND state_token=$2 AND status='pending' AND expires_at>now() AND consented_at IS NOT NULL RETURNING *")
+            .bind(connector).bind(state).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
+        let setup_id: Uuid = setup.get("id");
+        let result = self
+            .complete_food_callback(connector, code, state, &setup)
+            .await;
+        if result.is_err() {
+            sqlx::query("UPDATE vox_connection_setups SET status='failed',error='authorization_failed',verifier_ciphertext=NULL WHERE id=$1 AND status='exchanging'")
+                .bind(setup_id).execute(&self.pool).await?;
+        }
+        result
+    }
+    async fn complete_food_callback(
+        &self,
+        connector: &str,
+        code: Option<&str>,
+        state: &str,
+        setup: &sqlx::postgres::PgRow,
+    ) -> Result<Uuid, FreshConnectionError> {
+        let code = code
+            .filter(|s| !s.is_empty())
+            .ok_or(FreshConnectionError::Unauthorized)?;
+        let user_id: Uuid = setup.get("user_id");
+        let setup_id: Uuid = setup.get("id");
+        let redirect: String = setup.get("redirect_uri");
+        let encrypted: Vec<u8> = setup.get("verifier_ciphertext");
+        let credentials: crate::providers::food_oauth::SetupCredentials =
+            serde_json::from_str(&self.cipher()?.open(state.as_bytes(), &encrypted)?)
+                .map_err(|_| FreshConnectionError::Crypto)?;
+        let client = self.food_client(connector)?;
+        let tokens = client
+            .exchange(
+                &credentials.client_id,
+                &redirect,
+                code,
+                &credentials.verifier,
+            )
+            .await
+            .map_err(map_food_error)?;
+        let orders = client
+            .fetch_orders(&tokens.access_token)
+            .await
+            .map_err(map_food_error)?;
+        let aad = format!("{user_id}:{connector}");
+        let access = self.cipher()?.seal(aad.as_bytes(), &tokens.access_token)?;
+        let refresh = tokens
+            .refresh_token
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .map(|t| self.cipher()?.seal(aad.as_bytes(), t))
+            .transpose()?;
+        let expires = Utc::now() + Duration::seconds(tokens.expires_in);
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("setup:{user_id}:{connector}"))
+            .execute(&mut *tx)
+            .await?;
+        let valid: Option<Uuid> = sqlx::query_scalar("SELECT id FROM vox_connection_setups WHERE id=$1 AND status='exchanging' AND expires_at>now() FOR UPDATE").bind(setup_id).fetch_optional(&mut *tx).await?;
+        if valid.is_none() {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        let id: Uuid = sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,access_ciphertext,refresh_ciphertext,access_expires_at,authorization_state,sync_timeline,assistant_read,metadata,consented_at) VALUES($1,$2,$3,$4,$5,'authorized',true,true,$6,now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),credential_generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,access_ciphertext=EXCLUDED.access_ciphertext,refresh_ciphertext=EXCLUDED.refresh_ciphertext,access_expires_at=EXCLUDED.access_expires_at,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),failure_code=NULL,failure_count=0,account_id=NULL,account_display_id=NULL,updated_at=now() RETURNING id")
+            .bind(user_id).bind(connector).bind(access).bind(refresh).bind(expires)
+            .bind(json!({"auth_type":"oauth2","client_id":credentials.client_id})).fetch_one(&mut *tx).await?;
+        self.ingestor
+            .food_order(&mut tx, user_id, id, &orders)
+            .await?;
+        let interval = food_sync_interval(&orders);
+        sqlx::query("UPDATE vox_connections SET last_synced_at=now(),next_sync_at=now()+($2*interval '1 second') WHERE id=$1")
+            .bind(id).bind(interval).execute(&mut *tx).await?;
+        sqlx::query("UPDATE vox_connection_setups SET status='authorized',connection_id=$2,verifier_ciphertext=NULL WHERE id=$1")
+            .bind(setup_id).bind(id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        self.ingestor.food_committed(user_id, &orders);
+        Ok(id)
+    }
+    pub async fn sync_swiggy(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+    ) -> Result<usize, FreshConnectionError> {
+        self.sync_food(user_id, id, "swiggy").await
+    }
+    pub async fn sync_zomato(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+    ) -> Result<usize, FreshConnectionError> {
+        self.sync_food(user_id, id, "zomato").await
+    }
+    async fn sync_food(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        connector: &str,
+    ) -> Result<usize, FreshConnectionError> {
+        let conn = self.claim(user_id, id).await?;
+        let result = self.sync_food_claimed(user_id, id, connector, &conn).await;
+        if let Err(ref error) = result {
+            self.release_failure(id, &conn, error).await?;
+        }
+        result
+    }
+    async fn sync_food_claimed(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        connector: &str,
+        conn: &sqlx::postgres::PgRow,
+    ) -> Result<usize, FreshConnectionError> {
+        let orders = self.food_orders_claimed(user_id, connector, conn).await?;
+        let mut tx = self.pool.begin().await?;
+        self.validate_commit(&mut tx, user_id, id, conn).await?;
+        let count = self
+            .ingestor
+            .food_order(&mut tx, user_id, id, &orders)
+            .await?;
+        sqlx::query("UPDATE vox_connections SET last_synced_at=now(),next_sync_at=now()+($2*interval '1 second'),lease_token=NULL,lease_until=NULL,failure_count=0,failure_code=NULL,updated_at=now() WHERE id=$1")
+            .bind(id).bind(food_sync_interval(&orders)).execute(&mut *tx).await?;
+        tx.commit().await?;
+        self.ingestor.food_committed(user_id, &orders);
+        Ok(count)
+    }
+    async fn food_orders_claimed(
+        &self,
+        user_id: Uuid,
+        connector: &str,
+        conn: &sqlx::postgres::PgRow,
+    ) -> Result<Vec<crate::providers::food_delivery::FoodDeliveryOrder>, FreshConnectionError> {
+        if conn.get::<String, _>("connector_id") != connector {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        let metadata: Value = conn.get("metadata");
+        if metadata.get("auth_type").and_then(Value::as_str) != Some("oauth2") {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        let client = self.food_client(connector)?;
+        if !client.enabled() {
+            return Err(FreshConnectionError::NotConfigured(
+                "Provider disabled".into(),
+            ));
+        }
+        let aad = format!("{user_id}:{connector}");
+        let access: Vec<u8> = conn
+            .try_get("access_ciphertext")
+            .map_err(|_| FreshConnectionError::Unauthorized)?;
+        let mut access = self.cipher()?.open(aad.as_bytes(), &access)?;
+        let exp: Option<DateTime<Utc>> = conn.get("access_expires_at");
+        let mut refreshed = false;
+        if exp.is_none_or(|exp| exp <= Utc::now() + Duration::seconds(60)) {
+            access = self.refresh_food_token(user_id, connector, conn).await?;
+            refreshed = true;
+        }
+        match client.fetch_orders(&access).await {
+            Err(crate::providers::food_delivery::FoodDeliveryError::Unauthorized) if !refreshed => {
+                access = self.refresh_food_token(user_id, connector, conn).await?;
+                client.fetch_orders(&access).await.map_err(map_food_error)
+            }
+            result => result.map_err(map_food_error),
+        }
+    }
+    async fn refresh_food_token(
+        &self,
+        user_id: Uuid,
+        connector: &str,
+        conn: &sqlx::postgres::PgRow,
+    ) -> Result<String, FreshConnectionError> {
+        let aad = format!("{user_id}:{connector}");
+        let refresh: Vec<u8> = conn
+            .try_get("refresh_ciphertext")
+            .map_err(|_| FreshConnectionError::Unauthorized)?;
+        let refresh = self.cipher()?.open(aad.as_bytes(), &refresh)?;
+        let metadata: Value = conn.get("metadata");
+        let client_id = metadata
+            .get("client_id")
+            .and_then(Value::as_str)
+            .ok_or(FreshConnectionError::Unauthorized)?;
+        let tokens = self
+            .food_client(connector)?
+            .refresh(client_id, &refresh)
+            .await
+            .map_err(map_food_error)?;
+        let access = self.cipher()?.seal(aad.as_bytes(), &tokens.access_token)?;
+        let refresh = tokens
+            .refresh_token
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .map(|t| self.cipher()?.seal(aad.as_bytes(), t))
+            .transpose()?;
+        self.store_rotated(
+            conn,
+            conn.get("id"),
+            access,
+            refresh,
+            Utc::now() + Duration::seconds(tokens.expires_in),
+        )
+        .await?;
+        Ok(tokens.access_token)
+    }
+
     async fn exchange_playstation_npsso(
         &self,
         npsso: &str,
@@ -978,85 +1341,99 @@ impl FreshConnectionsService {
         conn: &sqlx::postgres::PgRow,
     ) -> Result<Value, FreshConnectionError> {
         let id: Uuid = conn.get("id");
-        let aad = format!("{user_id}:{connector}");
-        let stored: Vec<u8> = conn
-            .try_get("access_ciphertext")
-            .map_err(|_| FreshConnectionError::Unauthorized)?;
-        let mut access = self
-            .cipher()?
-            .open(aad.as_bytes(), &stored)
-            .map_err(|_| FreshConnectionError::Crypto)?;
-        if conn
-            .get::<Option<DateTime<Utc>>, _>("access_expires_at")
-            .is_none_or(|t| t <= Utc::now() + Duration::seconds(60))
-        {
+        let now = Utc::now();
+        if matches!(connector, "spotify" | "youtube" | "youtube_history") {
+            return self.read_personal_claimed(user_id, id, conn).await;
+        }
+        let mut items = if matches!(connector, "swiggy" | "zomato") {
+            serde_json::to_value(self.food_orders_claimed(user_id, connector, conn).await?)
+                .map_err(|_| FreshConnectionError::Provider("Invalid food response".into()))?
+        } else {
+            let aad = format!("{user_id}:{connector}");
             let stored: Vec<u8> = conn
-                .try_get("refresh_ciphertext")
+                .try_get("access_ciphertext")
                 .map_err(|_| FreshConnectionError::Unauthorized)?;
-            let refresh = self
+            let mut access = self
                 .cipher()?
                 .open(aad.as_bytes(), &stored)
                 .map_err(|_| FreshConnectionError::Crypto)?;
-            let (next, rotated, expiry) = match connector {
-                "google_calendar" => {
-                    let tokens = self
-                        .google
-                        .refresh(
-                            self.google_client_id
-                                .as_deref()
-                                .ok_or(FreshConnectionError::Unauthorized)?,
-                            self.google_client_secret
-                                .as_deref()
-                                .ok_or(FreshConnectionError::Unauthorized)?,
-                            &refresh,
+            if conn
+                .get::<Option<DateTime<Utc>>, _>("access_expires_at")
+                .is_none_or(|t| t <= Utc::now() + Duration::seconds(60))
+            {
+                let stored: Vec<u8> = conn
+                    .try_get("refresh_ciphertext")
+                    .map_err(|_| FreshConnectionError::Unauthorized)?;
+                let refresh = self
+                    .cipher()?
+                    .open(aad.as_bytes(), &stored)
+                    .map_err(|_| FreshConnectionError::Crypto)?;
+                let (next, rotated, expiry) = match connector {
+                    "google_calendar" => {
+                        let tokens = self
+                            .google
+                            .refresh(
+                                self.google_client_id
+                                    .as_deref()
+                                    .ok_or(FreshConnectionError::Unauthorized)?,
+                                self.google_client_secret
+                                    .as_deref()
+                                    .ok_or(FreshConnectionError::Unauthorized)?,
+                                &refresh,
+                            )
+                            .await
+                            .map_err(map_google_error)?;
+                        (
+                            tokens.access_token,
+                            tokens.refresh_token.unwrap_or(refresh),
+                            tokens.expires_in,
                         )
+                    }
+                    "playstation" => self.refresh_playstation_tokens(&refresh).await?,
+                    _ => return Err(FreshConnectionError::NotFound),
+                };
+                self.store_rotated(
+                    conn,
+                    id,
+                    self.cipher()?
+                        .seal(aad.as_bytes(), &next)
+                        .map_err(|_| FreshConnectionError::Crypto)?,
+                    Some(
+                        self.cipher()?
+                            .seal(aad.as_bytes(), &rotated)
+                            .map_err(|_| FreshConnectionError::Crypto)?,
+                    ),
+                    Utc::now() + Duration::seconds(expiry),
+                )
+                .await?;
+                access = next;
+            }
+            let items = match connector {
+                "google_calendar" => serde_json::to_value(
+                    self.google
+                        .events(&access, now - Duration::days(7), now + Duration::days(30))
                         .await
-                        .map_err(map_google_error)?;
-                    (
-                        tokens.access_token,
-                        tokens.refresh_token.unwrap_or(refresh),
-                        tokens.expires_in,
+                        .map_err(|_| {
+                            FreshConnectionError::Provider("Calendar read failed".into())
+                        })?,
+                )
+                .map_err(|_| FreshConnectionError::Invalid("Invalid calendar response".into()))?,
+                "playstation" => serde_json::to_value(
+                    self.fetch_playstation_games(
+                        &access,
+                        conn.get::<String, _>("account_id").as_str(),
                     )
-                }
-                "playstation" => self.refresh_playstation_tokens(&refresh).await?,
+                    .await?,
+                )
+                .map_err(|_| FreshConnectionError::Invalid("Invalid gaming response".into()))?,
                 _ => return Err(FreshConnectionError::NotFound),
             };
-            self.store_rotated(
-                conn,
-                id,
-                self.cipher()?
-                    .seal(aad.as_bytes(), &next)
-                    .map_err(|_| FreshConnectionError::Crypto)?,
-                Some(
-                    self.cipher()?
-                        .seal(aad.as_bytes(), &rotated)
-                        .map_err(|_| FreshConnectionError::Crypto)?,
-                ),
-                Utc::now() + Duration::seconds(expiry),
-            )
-            .await?;
-            access = next;
-        }
-        let now = Utc::now();
-        let mut items = match connector {
-            "google_calendar" => serde_json::to_value(
-                self.google
-                    .events(&access, now - Duration::days(7), now + Duration::days(30))
-                    .await
-                    .map_err(|_| FreshConnectionError::Provider("Calendar read failed".into()))?,
-            )
-            .map_err(|_| FreshConnectionError::Invalid("Invalid calendar response".into()))?,
-            "playstation" => serde_json::to_value(
-                self.fetch_playstation_games(&access, conn.get::<String, _>("account_id").as_str())
-                    .await?,
-            )
-            .map_err(|_| FreshConnectionError::Invalid("Invalid gaming response".into()))?,
-            _ => return Err(FreshConnectionError::NotFound),
+            items
         };
         let list = items
             .as_array_mut()
             .ok_or(FreshConnectionError::Invalid("Invalid response".into()))?;
-        let complete = list.len() <= limit;
+        let complete = list.len() <= limit && !matches!(connector, "swiggy" | "zomato");
         list.truncate(limit);
         let mut tx = self.pool.begin().await?;
         let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND assistant_read AND authorization_state='authorized' FOR UPDATE").bind(id).bind(user_id).bind(conn.get::<Uuid,_>("generation")).bind(conn.get::<Uuid,_>("lease_token")).fetch_optional(&mut *tx).await?;
@@ -1127,10 +1504,301 @@ impl FreshConnectionsService {
         Ok(())
     }
 
+    async fn start_personal_oauth(
+        &self,
+        user_id: Uuid,
+        connector: &str,
+    ) -> Result<StartConnectionResponse, FreshConnectionError> {
+        let redirect = self
+            .google_redirect()?
+            .replace("/google/callback", &format!("/{connector}/callback"));
+        let state = crate::crypto::random_token()?;
+        let verifier = crate::crypto::random_token()?;
+        let authorization_url = self
+            .personal
+            .auth_url(connector, &redirect, &state, &verifier)?;
+        let sealed = self.cipher()?.seal(state.as_bytes(), &verifier)?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("setup:{user_id}:{connector}"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL WHERE user_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')").bind(user_id).bind(connector).execute(&mut *tx).await?;
+        let setup_id=sqlx::query_scalar("INSERT INTO vox_connection_setups(user_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES($1,$2,$3,$4,$5,now()) RETURNING id").bind(user_id).bind(connector).bind(state).bind(sealed).bind(redirect).fetch_one(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(StartConnectionResponse {
+            setup_id: Some(setup_id),
+            connection_id: None,
+            authorization_url: Some(authorization_url),
+            status: "pending".into(),
+        })
+    }
+    pub async fn handle_personal_callback(
+        &self,
+        connector: &str,
+        code: Option<&str>,
+        state: &str,
+    ) -> Result<Uuid, FreshConnectionError> {
+        if !self.personal.enabled(connector) {
+            return Err(FreshConnectionError::NotConfigured(
+                "Provider disabled".into(),
+            ));
+        }
+        let setup=sqlx::query("UPDATE vox_connection_setups SET status='exchanging' WHERE connector_id=$1 AND state_token=$2 AND status='pending' AND expires_at>now() AND consented_at IS NOT NULL RETURNING *").bind(connector).bind(state).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
+        let result = self
+            .complete_personal_callback(connector, code, state, &setup)
+            .await;
+        if result.is_err() {
+            sqlx::query("UPDATE vox_connection_setups SET status='failed',error='authorization_failed',verifier_ciphertext=NULL WHERE id=$1 AND status='exchanging'").bind(setup.get::<Uuid,_>("id")).execute(&self.pool).await?;
+        }
+        result
+    }
+    async fn complete_personal_callback(
+        &self,
+        connector: &str,
+        code: Option<&str>,
+        state: &str,
+        setup: &sqlx::postgres::PgRow,
+    ) -> Result<Uuid, FreshConnectionError> {
+        let user_id: Uuid = setup.get("user_id");
+        let setup_id: Uuid = setup.get("id");
+        let redirect: String = setup.get("redirect_uri");
+        let stored: Vec<u8> = setup.get("verifier_ciphertext");
+        let verifier = self.cipher()?.open(state.as_bytes(), &stored)?;
+        let tokens = self
+            .personal
+            .tokens(connector, code, &redirect, &verifier, None)
+            .await?;
+        let access = crate::providers::personal::StoredAccess {
+            token: tokens.access_token,
+        };
+        let snapshot = self.personal.snapshot(connector, &access).await?;
+        let aad = format!("{user_id}:{connector}");
+        let sealed = self.cipher()?.seal(
+            aad.as_bytes(),
+            &serde_json::to_string(&access).map_err(|_| FreshConnectionError::Crypto)?,
+        )?;
+        let refresh = self.cipher()?.seal(
+            aad.as_bytes(),
+            tokens
+                .refresh_token
+                .as_deref()
+                .ok_or(FreshConnectionError::Unauthorized)?,
+        )?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("setup:{user_id}:{connector}"))
+            .execute(&mut *tx)
+            .await?;
+        let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connection_setups WHERE id=$1 AND status='exchanging' AND expires_at>now() FOR UPDATE").bind(setup_id).fetch_optional(&mut *tx).await?;
+        if valid.is_none() {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,account_id,account_display_id,access_ciphertext,refresh_ciphertext,access_expires_at,authorization_state,sync_timeline,assistant_read,metadata,consented_at) VALUES($1,$2,$3,$4,$5,$6,$7,'authorized',true,true,$8,now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),credential_generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,account_id=EXCLUDED.account_id,account_display_id=EXCLUDED.account_display_id,access_ciphertext=EXCLUDED.access_ciphertext,refresh_ciphertext=EXCLUDED.refresh_ciphertext,access_expires_at=EXCLUDED.access_expires_at,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),failure_code=NULL,failure_count=0,updated_at=now() RETURNING id")
+            .bind(user_id).bind(connector).bind(&snapshot.account_id).bind(&snapshot.display_id).bind(sealed).bind(refresh).bind(Utc::now()+Duration::seconds(tokens.expires_in)).bind(json!({"auth_type":"oauth2","snapshot":snapshot.context})).fetch_one(&mut *tx).await?;
+        self.ingestor
+            .personal_activity(&mut tx, user_id, id, connector, &snapshot.activities)
+            .await?;
+        sqlx::query("UPDATE vox_connections SET last_synced_at=now(),next_sync_at=now()+interval '15 minutes' WHERE id=$1").bind(id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE vox_connection_setups SET status='authorized',connection_id=$2,verifier_ciphertext=NULL WHERE id=$1").bind(setup_id).bind(id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(id)
+    }
+    async fn personal_access(
+        &self,
+        user_id: Uuid,
+        connector: &str,
+        conn: &sqlx::postgres::PgRow,
+        force_refresh: bool,
+    ) -> Result<crate::providers::personal::StoredAccess, FreshConnectionError> {
+        if conn.get::<String, _>("connector_id") != connector || !self.personal.enabled(connector) {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        let aad = format!("{user_id}:{connector}");
+        let stored: Vec<u8> = conn
+            .try_get("access_ciphertext")
+            .map_err(|_| FreshConnectionError::Unauthorized)?;
+        let mut access: crate::providers::personal::StoredAccess =
+            serde_json::from_str(&self.cipher()?.open(aad.as_bytes(), &stored)?)
+                .map_err(|_| FreshConnectionError::Crypto)?;
+        if force_refresh
+            || conn
+                .get::<Option<DateTime<Utc>>, _>("access_expires_at")
+                .is_none_or(|exp| exp <= Utc::now() + Duration::seconds(60))
+        {
+            let stored: Vec<u8> = conn
+                .try_get("refresh_ciphertext")
+                .map_err(|_| FreshConnectionError::Unauthorized)?;
+            let refresh = self.cipher()?.open(aad.as_bytes(), &stored)?;
+            let tokens = self
+                .personal
+                .tokens(connector, None, "", "", Some(&refresh))
+                .await?;
+            access.token = tokens.access_token;
+            let sealed = self.cipher()?.seal(
+                aad.as_bytes(),
+                &serde_json::to_string(&access).map_err(|_| FreshConnectionError::Crypto)?,
+            )?;
+            let refresh = tokens
+                .refresh_token
+                .as_deref()
+                .filter(|v| !v.is_empty())
+                .map(|token| self.cipher()?.seal(aad.as_bytes(), token))
+                .transpose()?;
+            self.store_rotated(
+                conn,
+                conn.get("id"),
+                sealed,
+                refresh,
+                Utc::now() + Duration::seconds(tokens.expires_in),
+            )
+            .await?;
+        }
+        Ok(access)
+    }
+    async fn personal_snapshot(
+        &self,
+        user_id: Uuid,
+        connector: &str,
+        conn: &sqlx::postgres::PgRow,
+    ) -> Result<crate::providers::personal::Snapshot, FreshConnectionError> {
+        let proactively_refreshed = conn
+            .get::<Option<DateTime<Utc>>, _>("access_expires_at")
+            .is_none_or(|exp| exp <= Utc::now() + Duration::seconds(60));
+        let access = self
+            .personal_access(user_id, connector, conn, false)
+            .await?;
+        let result = self.personal.snapshot(connector, &access).await;
+        let snapshot = if !proactively_refreshed
+            && matches!(result, Err(FreshConnectionError::Unauthorized))
+        {
+            let access = self.personal_access(user_id, connector, conn, true).await?;
+            self.personal.snapshot(connector, &access).await?
+        } else {
+            result?
+        };
+        if conn.get::<Option<String>, _>("account_id").as_deref() != Some(&snapshot.account_id) {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        Ok(snapshot)
+    }
+    pub async fn sync_personal(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        connector: &str,
+    ) -> Result<usize, FreshConnectionError> {
+        let conn = self.claim(user_id, id).await?;
+        let result = self
+            .sync_personal_claimed(user_id, id, connector, &conn)
+            .await;
+        if let Err(ref error) = result {
+            self.release_failure(id, &conn, error).await?;
+        }
+        result
+    }
+    async fn sync_personal_claimed(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        connector: &str,
+        conn: &sqlx::postgres::PgRow,
+    ) -> Result<usize, FreshConnectionError> {
+        let snapshot = self.personal_snapshot(user_id, connector, conn).await?;
+        let mut tx = self.pool.begin().await?;
+        self.validate_commit(&mut tx, user_id, id, conn).await?;
+        let count = self
+            .ingestor
+            .personal_activity(&mut tx, user_id, id, connector, &snapshot.activities)
+            .await?;
+        sqlx::query("UPDATE vox_connections SET metadata=jsonb_set(metadata,'{snapshot}',$2),last_synced_at=now(),next_sync_at=now()+interval '15 minutes',lease_token=NULL,lease_until=NULL,failure_count=0,failure_code=NULL,updated_at=now() WHERE id=$1").bind(id).bind(snapshot.context).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(count)
+    }
+    pub async fn read_personal(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+    ) -> Result<Value, FreshConnectionError> {
+        let conn=sqlx::query("UPDATE vox_connections SET lease_token=$3,lease_until=now()+interval '15 minutes' WHERE id=$1 AND user_id=$2 AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL AND connector_id IN ('spotify','youtube','youtube_history') AND (lease_until IS NULL OR lease_until<=now()) RETURNING *").bind(id).bind(user_id).bind(Uuid::new_v4()).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
+        let result = self.read_personal_claimed(user_id, id, &conn).await;
+        if let Err(ref error) = result {
+            self.release_failure(id, &conn, error).await?;
+        }
+        result
+    }
+    async fn read_personal_claimed(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        conn: &sqlx::postgres::PgRow,
+    ) -> Result<Value, FreshConnectionError> {
+        let connector: String = conn.get("connector_id");
+        let data = if connector == "youtube_history" {
+            conn.get::<Value, _>("metadata")["snapshot"].clone()
+        } else {
+            self.personal_snapshot(user_id, &connector, conn)
+                .await?
+                .context
+        };
+        let mut tx = self.pool.begin().await?;
+        self.validate_personal_read(&mut tx, user_id, id, conn)
+            .await?;
+        sqlx::query("UPDATE vox_connections SET lease_token=NULL,lease_until=NULL WHERE id=$1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(json!({"connector_id":connector,"observed_at":Utc::now(),"complete":false,"data":data}))
+    }
+    async fn validate_personal_read(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user_id: Uuid,
+        id: Uuid,
+        conn: &sqlx::postgres::PgRow,
+    ) -> Result<(), FreshConnectionError> {
+        let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL FOR UPDATE").bind(id).bind(user_id).bind(conn.get::<Uuid,_>("generation")).bind(conn.get::<Uuid,_>("lease_token")).fetch_optional(&mut **tx).await?;
+        if valid.is_none() {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+        Ok(())
+    }
+    pub async fn import_youtube_history(
+        &self,
+        user_id: Uuid,
+        history: Value,
+        consent: bool,
+    ) -> Result<Value, FreshConnectionError> {
+        if !consent {
+            return Err(FreshConnectionError::Invalid(
+                "Import consent required".into(),
+            ));
+        }
+        let (items, skipped) = crate::providers::personal::parse_youtube_history(&history)?;
+        if items.is_empty() {
+            return Err(FreshConnectionError::Invalid(
+                "No valid YouTube watch records found".into(),
+            ));
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("setup:{user_id}:youtube_history"))
+            .execute(&mut *tx)
+            .await?;
+        let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,account_id,account_display_id,authorization_state,sync_timeline,assistant_read,metadata,consented_at,last_synced_at) VALUES($1,'youtube_history',$2,'Google Takeout watch history','authorized',true,true,$3,now(),now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),last_synced_at=now(),updated_at=now() RETURNING id").bind(user_id).bind(user_id.to_string()).bind(json!({"auth_type":"import","snapshot":{"watch_history":items.iter().rev().take(100).collect::<Vec<_>>(),"source":"google_takeout","complete":false}})).fetch_one(&mut *tx).await?;
+        let imported = self
+            .ingestor
+            .personal_activity(&mut tx, user_id, id, "youtube_history", &items)
+            .await?;
+        tx.commit().await?;
+        Ok(json!({"imported":imported,"skipped":skipped,"complete":false,"connection_id":id}))
+    }
+
     pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError> {
         let rows = sqlx::query(
             "SELECT id, user_id, connector_id FROM vox_connections \
-             WHERE authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() \
+             WHERE authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() AND (lease_until IS NULL OR lease_until <= now()) AND connector_id IN ('google_calendar','playstation','swiggy','zomato','spotify','youtube') ORDER BY next_sync_at \
              LIMIT 20",
         )
         .fetch_all(&self.pool)
@@ -1143,7 +1811,9 @@ impl FreshConnectionsService {
 
             let result = match connector_id.as_str() {
                 "google_calendar" => self.refresh(user_id, id).await.map(|_| ()),
-                "playstation" => self.refresh(user_id, id).await.map(|_| ()),
+                "playstation" | "swiggy" | "zomato" | "spotify" | "youtube" => {
+                    self.refresh(user_id, id).await.map(|_| ())
+                }
                 _ => Ok(()),
             };
 
@@ -1176,5 +1846,38 @@ fn map_psn_error(error: crate::providers::playstation::PlayStationError) -> Fres
             FreshConnectionError::Unauthorized
         }
         _ => FreshConnectionError::Provider("PSN request failed".into()),
+    }
+}
+
+fn map_food_error(
+    error: crate::providers::food_delivery::FoodDeliveryError,
+) -> FreshConnectionError {
+    match error {
+        crate::providers::food_delivery::FoodDeliveryError::Unauthorized => {
+            FreshConnectionError::Unauthorized
+        }
+        _ => FreshConnectionError::Provider(error.to_string()),
+    }
+}
+fn food_sync_interval(orders: &[crate::providers::food_delivery::FoodDeliveryOrder]) -> i64 {
+    if orders.iter().any(|o| {
+        o.status.is_active()
+            || o.provider_data
+                .get("isActiveOrder")
+                .and_then(Value::as_bool)
+                == Some(true)
+    }) {
+        orders
+            .iter()
+            .filter_map(|o| o.provider_data.pointer("/tracking/pollingIntervalSeconds"))
+            .filter_map(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+            })
+            .max()
+            .unwrap_or(60)
+            .clamp(60, 86400)
+    } else {
+        900
     }
 }

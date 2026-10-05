@@ -788,3 +788,419 @@ async fn disconnect_fences_inflight_verified_sony_link() {
     assert!(svc.list_connections(user).await.unwrap().is_empty());
     server.abort();
 }
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn food_expiry_without_refresh_requires_reconnect_and_releases_lease() {
+    let (mut svc, user, id) = fixture().await;
+    svc.swiggy.client.enabled = true;
+    let aad = format!("{user}:swiggy");
+    let access = svc
+        .cipher()
+        .unwrap()
+        .seal(aad.as_bytes(), "expired-access")
+        .unwrap();
+    sqlx::query("UPDATE vox_connections SET connector_id='swiggy',access_ciphertext=$2,access_expires_at=now()-interval '1 minute',metadata='{\"auth_type\":\"oauth2\",\"client_id\":\"registered-client\"}' WHERE id=$1")
+        .bind(id).bind(access).execute(&svc.pool).await.unwrap();
+    assert!(matches!(
+        svc.refresh(user, id).await,
+        Err(FreshConnectionError::Unauthorized)
+    ));
+    let row = sqlx::query(
+        "SELECT authorization_state,failure_code,lease_token FROM vox_connections WHERE id=$1",
+    )
+    .bind(id)
+    .fetch_one(&svc.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>("authorization_state"), "expired");
+    assert_eq!(row.get::<String, _>("failure_code"), "reconnect_required");
+    assert_eq!(row.get::<Option<Uuid>, _>("lease_token"), None);
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn food_oauth_links_only_after_verified_reads_and_rejects_callback_replay() {
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::{Json, Router, routing::post};
+    let app=Router::new()
+        .route("/register",post(|Json(v):Json<Value>| async move {
+            assert_eq!(v["token_endpoint_auth_method"],"none");
+            Json(json!({"client_id":"registered-client"}))
+        }))
+        .route("/token",post(|Json(v):Json<Value>| async move {
+            assert_eq!(v["grant_type"],"authorization_code");
+            assert_eq!(v["client_id"],"registered-client");
+            assert!(!v["code_verifier"].as_str().unwrap().is_empty());
+            Json(json!({"access_token":"verified-access","refresh_token":"issued-refresh","expires_in":3600,"token_type":"Bearer"}))
+        }))
+        .route("/mcp",post(|headers:HeaderMap,Json(v):Json<Value>|async move {
+            assert_eq!(headers.get("Authorization").unwrap(),"Bearer verified-access");
+            let result=match v["method"].as_str().unwrap() {
+                "initialize"=>json!({"protocolVersion":"2025-03-26"}),
+                "notifications/initialized"=>return(StatusCode::ACCEPTED,Json(Value::Null)),
+                "tools/call"=>{
+                    assert_eq!(v["params"]["name"],"get_addresses");
+                    json!({"structuredContent":{"success":true,"data":{"addresses":[],"pagination":{"hasMore":false}}}})
+                }, _=>panic!("Unexpected MCP method"),
+            };
+            (StatusCode::OK,Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result})))
+        }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let (mut svc, user, _) = fixture().await;
+    svc.swiggy.client.enabled = true;
+    svc.swiggy.client.auth_base = base.clone();
+    svc.swiggy.client.endpoint = format!("{base}/mcp");
+    let setup = svc
+        .start(
+            user,
+            StartConnectionRequest {
+                connector_id: "swiggy".into(),
+                npsso: None,
+                consent: true,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(setup.status, "pending");
+    assert_eq!(setup.connection_id, None);
+    let url = url::Url::parse(&setup.authorization_url.unwrap()).unwrap();
+    let args: std::collections::HashMap<_, _> = url.query_pairs().collect();
+    assert_eq!(args.get("code_challenge_method").unwrap(), "S256");
+    assert_eq!(
+        args.get("redirect_uri").unwrap(),
+        "https://core.example/v1/connectors/swiggy/callback"
+    );
+    let state = args.get("state").unwrap();
+    let id = svc
+        .handle_food_callback("swiggy", Some("single-use-code"), state)
+        .await
+        .unwrap();
+    assert!(
+        svc.handle_food_callback("swiggy", Some("single-use-code"), state)
+            .await
+            .is_err()
+    );
+    let row=sqlx::query("SELECT access_ciphertext,refresh_ciphertext,last_synced_at FROM vox_connections WHERE id=$1").bind(id).fetch_one(&svc.pool).await.unwrap();
+    let aad = format!("{user}:swiggy");
+    let bytes: Vec<u8> = row.get("refresh_ciphertext");
+    assert_ne!(bytes, b"issued-refresh".to_vec());
+    assert_eq!(
+        svc.cipher().unwrap().open(aad.as_bytes(), &bytes).unwrap(),
+        "issued-refresh"
+    );
+    assert!(
+        row.get::<Option<DateTime<Utc>>, _>("last_synced_at")
+            .is_some()
+    );
+    server.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn food_rotation_survives_subsequent_read_failure_and_sync_is_retryable() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    let app=Router::new().route("/token",post(|Json(v):Json<Value>| async move {
+        assert_eq!(v["grant_type"],"refresh_token");assert_eq!(v["refresh_token"],"old-refresh");
+        Json(json!({"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600,"token_type":"Bearer"}))
+    })).route("/mcp",post(||async{StatusCode::SERVICE_UNAVAILABLE}));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let (mut svc, user, id) = fixture().await;
+    svc.swiggy.client.enabled = true;
+    svc.swiggy.client.auth_base = base.clone();
+    svc.swiggy.client.endpoint = format!("{base}/mcp");
+    let aad = format!("{user}:swiggy");
+    let cipher = svc.cipher().unwrap();
+    sqlx::query("UPDATE vox_connections SET connector_id='swiggy',access_ciphertext=$2,refresh_ciphertext=$3,access_expires_at=now()-interval '1 minute',metadata='{\"auth_type\":\"oauth2\",\"client_id\":\"registered-client\"}' WHERE id=$1")
+        .bind(id).bind(cipher.seal(aad.as_bytes(),"old-access").unwrap()).bind(cipher.seal(aad.as_bytes(),"old-refresh").unwrap()).execute(&svc.pool).await.unwrap();
+    assert!(matches!(
+        svc.refresh(user, id).await,
+        Err(FreshConnectionError::Provider(_))
+    ));
+    let row=sqlx::query("SELECT access_ciphertext,refresh_ciphertext,lease_token,failure_code,authorization_state FROM vox_connections WHERE id=$1").bind(id).fetch_one(&svc.pool).await.unwrap();
+    assert_eq!(
+        cipher
+            .open(aad.as_bytes(), &row.get::<Vec<u8>, _>("access_ciphertext"))
+            .unwrap(),
+        "rotated-access"
+    );
+    assert_eq!(
+        cipher
+            .open(aad.as_bytes(), &row.get::<Vec<u8>, _>("refresh_ciphertext"))
+            .unwrap(),
+        "rotated-refresh"
+    );
+    assert_eq!(row.get::<Option<Uuid>, _>("lease_token"), None);
+    assert_eq!(row.get::<String, _>("authorization_state"), "authorized");
+    assert_eq!(row.get::<String, _>("failure_code"), "sync_failed");
+    server.abort();
+}
+
+struct PersonalIngestor;
+#[async_trait::async_trait]
+impl TimelineIngestor for PersonalIngestor {
+    async fn calendar(
+        &self,
+        _: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _: Uuid,
+        _: Uuid,
+        _: &str,
+        _: &[GoogleCalendarEvent],
+        _: DateTime<Utc>,
+        _: DateTime<Utc>,
+    ) -> Result<usize, FreshConnectionError> {
+        Ok(0)
+    }
+    async fn gaming(
+        &self,
+        _: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _: Uuid,
+        _: Uuid,
+        _: &[ObservedActivity],
+    ) -> Result<usize, FreshConnectionError> {
+        Ok(0)
+    }
+    async fn personal_activity(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _: Uuid,
+        _: Uuid,
+        connector: &str,
+        items: &[crate::providers::personal::PersonalActivity],
+    ) -> Result<usize, FreshConnectionError> {
+        let mut count = 0;
+        for item in items {
+            count+=sqlx::query("INSERT INTO test_personal_items(connector,source_id,title) VALUES($1,$2,$3) ON CONFLICT DO NOTHING").bind(connector).bind(&item.source_id).bind(&item.title).execute(&mut **tx).await?.rows_affected() as usize;
+        }
+        Ok(count)
+    }
+}
+async fn personal_fixture() -> (
+    FreshConnectionsService,
+    Uuid,
+    tokio::task::JoinHandle<()>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let (mut svc, user, _) = fixture().await;
+    sqlx::query("CREATE TABLE test_personal_items(connector text,source_id text,title text,PRIMARY KEY(connector,source_id))").execute(&svc.pool).await.unwrap();
+    svc.ingestor = std::sync::Arc::new(PersonalIngestor);
+    let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = hits.clone();
+    let router=axum::Router::new().fallback(move |request:axum::extract::Request|{let counter=counter.clone();async move {
+        let path=request.uri().path().to_owned();
+        let method=request.method().clone();
+        let response=match path.as_str(){
+            "/api/token"|"/token"=>{let body=axum::body::to_bytes(request.into_body(),8192).await.unwrap();let fields=url::form_urlencoded::parse(&body).into_owned().collect::<std::collections::BTreeMap<_,_>>();assert!(fields.contains_key("client_id"));let n=counter.fetch_add(1,std::sync::atomic::Ordering::SeqCst);if fields.get("grant_type").is_some_and(|v|v=="refresh_token"){assert_eq!(fields.get("refresh_token").unwrap(),"refresh-initial");}else{assert_eq!(fields.get("code").unwrap(),"accepted-code");if path=="/api/token"{assert!(fields.contains_key("code_verifier"));}}json!({"access_token":format!("access-{n}"),"refresh_token":if n==0 {"refresh-initial"}else{"refresh-rotated"},"expires_in":3600})},
+            "/v1/me"=>json!({"id":"verified-account","display_name":"Listener"}),
+                "/youtube/v3/channels" => json!({"items":[{"id":"channel-owner","snippet":{"title":"YouTube channel"},"contentDetails":{"relatedPlaylists":{"likes":"liked-playlist"}}}]}),
+                "/youtube/v3/playlists" => json!({"items":[{"id":"playlist-one","snippet":{"title":"Saved playlist"}}]}),
+                "/youtube/v3/subscriptions" => json!({"items":[{"id":"subscription","snippet":{"title":"Subscribed channel","publishedAt":"2026-01-01T00:00:00Z"}}]}),
+                "/youtube/v3/playlistItems" => json!({"items":[{"id":"playlist-item","snippet":{"title":"Video","publishedAt":"2026-01-02T00:00:00Z","resourceId":{"videoId":"abcdefghijk"}},"contentDetails":{"videoPublishedAt":"2020-01-01T00:00:00Z"}}]}),
+
+            "/v1/me/playlists"=>json!({"items":[{"id":"playlist","name":"Mix"}]}),
+            "/v1/me/player/recently-played"=>json!({"items":[{"played_at":"2026-01-01T12:00:00Z","track":{"id":"track","name":"Song","duration_ms":300000}}]}),
+            _=>panic!("Unexpected personal provider endpoint {path}")
+        }; axum::Json(response)
+    }});
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    svc.personal.spotify_id = Some("spotify-client".into());
+    svc.personal.test_origin = Some(origin);
+    (svc, user, task, hits)
+}
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn personal_spotify_oauth_encrypted_single_use_refresh_owned_and_deduped() {
+    let (svc, user, server, hits) = personal_fixture().await;
+    let start = svc
+        .start(
+            user,
+            StartConnectionRequest {
+                connector_id: "spotify".into(),
+                consent: true,
+                npsso: None,
+            },
+        )
+        .await
+        .unwrap();
+    let auth = url::Url::parse(start.authorization_url.as_ref().unwrap()).unwrap();
+    let state = auth
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    assert!(
+        auth.query_pairs()
+            .any(|(k, v)| k == "code_challenge_method" && v == "S256")
+    );
+    let id = svc
+        .handle_personal_callback("spotify", Some("accepted-code"), &state)
+        .await
+        .unwrap();
+    assert!(
+        svc.handle_personal_callback("spotify", Some("accepted-code"), &state)
+            .await
+            .is_err()
+    );
+    let row = sqlx::query("SELECT * FROM vox_connections WHERE id=$1")
+        .bind(id)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap();
+    assert_eq!(row.get::<String, _>("account_id"), "verified-account");
+    let sealed: Vec<u8> = row.get("access_ciphertext");
+    assert!(!String::from_utf8_lossy(&sealed).contains("access-0"));
+    assert!(
+        svc.cipher()
+            .unwrap()
+            .open(format!("{}:spotify", Uuid::new_v4()).as_bytes(), &sealed)
+            .is_err()
+    );
+    sqlx::query(
+        "UPDATE vox_connections SET access_expires_at=now()-interval '1 minute' WHERE id=$1",
+    )
+    .bind(id)
+    .execute(&svc.pool)
+    .await
+    .unwrap();
+    assert_eq!(svc.refresh(user, id).await.unwrap().spans_created, 0);
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let row = sqlx::query("SELECT refresh_ciphertext FROM vox_connections WHERE id=$1")
+        .bind(id)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        svc.cipher()
+            .unwrap()
+            .open(
+                format!("{user}:spotify").as_bytes(),
+                &row.get::<Vec<u8>, _>("refresh_ciphertext")
+            )
+            .unwrap(),
+        "refresh-rotated"
+    );
+    assert!(svc.read_personal(Uuid::new_v4(), id).await.is_err());
+    let read = svc.read_personal(user, id).await.unwrap();
+    assert_eq!(read["data"]["recently_played"][0]["track"]["name"], "Song");
+    svc.update_preferences(
+        user,
+        id,
+        PreferencesRequest {
+            sync_timeline: None,
+            assistant_read: Some(false),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(svc.read_personal(user, id).await.is_err());
+    svc.disconnect(user, id).await.unwrap();
+    assert!(svc.refresh(user, id).await.is_err());
+    server.abort();
+}
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn personal_history_import_requires_consent_dedupes_and_is_separate_from_oauth() {
+    let (svc, user, server, _) = personal_fixture().await;
+    let history = json!([{"products":["YouTube"],"title":"Watched Real video","titleUrl":"https://www.youtube.com/watch?v=abcdefghijk","time":"2026-01-01T12:00:00Z"},{"title":"Searched"}]);
+    assert!(
+        svc.import_youtube_history(user, history.clone(), false)
+            .await
+            .is_err()
+    );
+    let result = svc
+        .import_youtube_history(user, history.clone(), true)
+        .await
+        .unwrap();
+    assert_eq!(result["imported"], 1);
+    assert_eq!(result["skipped"], 1);
+    assert_eq!(result["complete"], false);
+    assert_eq!(
+        svc.import_youtube_history(user, history, true)
+            .await
+            .unwrap()["imported"],
+        0
+    );
+    let id: Uuid = serde_json::from_value(result["connection_id"].clone()).unwrap();
+    let read = svc.read_personal(user, id).await.unwrap();
+    assert_eq!(read["connector_id"], "youtube_history");
+    assert_eq!(
+        read["data"]["watch_history"][0]["provider_data"]["action"],
+        "watch"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM vox_connections WHERE user_id=$1 AND connector_id='youtube'"
+        )
+        .bind(user)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap(),
+        0
+    );
+    server.abort();
+}
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn personal_youtube_oauth_reads_only_playlists_likes_and_subscription_snapshots() {
+    let (svc, user, server, _) = personal_fixture().await;
+    let start = svc
+        .start(
+            user,
+            StartConnectionRequest {
+                connector_id: "youtube".into(),
+                consent: true,
+                npsso: None,
+            },
+        )
+        .await
+        .unwrap();
+    let auth = url::Url::parse(start.authorization_url.as_ref().unwrap()).unwrap();
+    let state = auth
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    assert!(
+        auth.query_pairs()
+            .any(|(k, v)| k == "scope" && v == "https://www.googleapis.com/auth/youtube.readonly")
+    );
+    let id = svc
+        .handle_personal_callback("youtube", Some("accepted-code"), &state)
+        .await
+        .unwrap();
+    let read = svc.read_personal(user, id).await.unwrap();
+    assert_eq!(read["data"]["watch_history_available"], false);
+    assert_eq!(read["data"]["subscriptions_are_snapshot"], true);
+    let actions = read["data"]["playlist_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v["action"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(actions, vec!["playlist_addition", "like"]);
+    assert_eq!(svc.refresh(user, id).await.unwrap().spans_created, 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM test_personal_items WHERE connector='youtube'"
+        )
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap(),
+        2
+    );
+    server.abort();
+}
