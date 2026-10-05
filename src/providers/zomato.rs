@@ -17,7 +17,7 @@ impl ZomatoClient {
                 "zomato",
                 "https://mcp-server.zomato.com/mcp",
                 "https://mcp-server.zomato.com",
-                "ZOMATO_MCP_ENABLED",
+                std::env::var("ZOMATO_MCP_ENABLED").is_ok_and(|v| v == "true"),
                 true,
             ),
         }

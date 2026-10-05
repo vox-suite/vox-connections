@@ -91,7 +91,7 @@ impl Client {
         provider: &'static str,
         endpoint: &str,
         auth_base: &str,
-        enabled_var: &str,
+        enabled: bool,
         form_tokens: bool,
     ) -> Self {
         Self {
@@ -99,7 +99,7 @@ impl Client {
             provider,
             endpoint: endpoint.into(),
             auth_base: auth_base.into(),
-            enabled: std::env::var(enabled_var).is_ok_and(|v| v == "true"),
+            enabled,
             form_tokens,
         }
     }

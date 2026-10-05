@@ -4,7 +4,7 @@ The food integrations use official MCP endpoints with per-user OAuth authorizati
 
 ## Provider setup
 
-Keep both integrations disabled until provider access is approved and the exact callback URL is allowlisted. Set `SWIGGY_MCP_ENABLED=true` and/or `ZOMATO_MCP_ENABLED=true` in both Core API and Worker environments after approval. `VOX_CREDENTIAL_KEY` for credential encryption and `VOX_CORE_API_URL` must also be configured.
+Swiggy is enabled by default and needs no feature flag. Its exact callback URL must be allowlisted by Swiggy. Zomato stays disabled until `ZOMATO_MCP_ENABLED=true` is set in both Core API and Worker environments after approval. `VOX_CREDENTIAL_KEY` for credential encryption and `VOX_CORE_API_URL` must also be configured.
 
 Callback URLs:
 

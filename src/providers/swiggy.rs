@@ -19,7 +19,7 @@ impl SwiggyClient {
                 "swiggy",
                 "https://mcp.swiggy.com/food",
                 "https://mcp.swiggy.com/auth",
-                "SWIGGY_MCP_ENABLED",
+                true,
                 false,
             ),
         }
