@@ -5728,15 +5728,15 @@
         "declaration": "pub use vox_connections::accounts::*;"
       },
       {
-        "line": 748,
+        "line": 752,
         "declaration": "pub struct FreshConnectionsService(vox_connections::accounts::FreshConnectionsService, PgPool)"
       },
       {
-        "line": 756,
+        "line": 760,
         "declaration": "pub async fn native_scope( &self, user: Uuid, ) -> Result<vox_connections::identity::RequestContext, FreshConnectionError>"
       },
       {
-        "line": 774,
+        "line": 778,
         "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, hub: Option<crate::realtime::UserEventHub>, client: Option<String>, secret: Option<String>, core_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
       }
     ],
@@ -18507,7 +18507,7 @@
       "classification": "newly added",
       "added_lines": "1167",
       "deleted_lines": "0",
-      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant",
+      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback",
       "public_before": [],
       "public_after": [
         {
@@ -25639,7 +25639,7 @@
       "classification": "rewritten",
       "added_lines": "13",
       "deleted_lines": "0",
-      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant",
+      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback",
       "public_before": [
         {
           "line": 17,
@@ -26208,7 +26208,7 @@
       "classification": "rewritten",
       "added_lines": "773",
       "deleted_lines": "70",
-      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant",
+      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback",
       "public_before": [
         {
           "line": 17,
@@ -27229,7 +27229,7 @@
       "classification": "moved/refactored",
       "added_lines": "9",
       "deleted_lines": "37",
-      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant",
+      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback",
       "public_before": [
         {
           "line": 17,
@@ -28996,6 +28996,1685 @@
       ],
       "public_removed_or_changed": [],
       "public_added_or_changed": []
+    },
+    {
+      "commit": "f93cde6209937698a4ccb4914e2e35ec875d3a58",
+      "parent": "4eafba6893bfa351aafe3d5ff571042ffeaacf3d",
+      "before_path": "src/accounts.rs",
+      "after_path": "src/accounts.rs",
+      "status": "M",
+      "classification": "rewritten",
+      "added_lines": "1",
+      "deleted_lines": "14",
+      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback",
+      "public_before": [
+        {
+          "line": 17,
+          "declaration": "pub enum FreshConnectionError"
+        },
+        {
+          "line": 35,
+          "declaration": "pub struct ConnectorDescriptor"
+        },
+        {
+          "line": 45,
+          "declaration": "pub struct ConnectionItem"
+        },
+        {
+          "line": 58,
+          "declaration": "pub struct StartConnectionRequest"
+        },
+        {
+          "line": 65,
+          "declaration": "pub struct StartConnectionResponse"
+        },
+        {
+          "line": 73,
+          "declaration": "pub struct SetupStatusResponse"
+        },
+        {
+          "line": 80,
+          "declaration": "pub struct PreferencesRequest"
+        },
+        {
+          "line": 86,
+          "declaration": "pub struct RefreshResponse"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync"
+        },
+        {
+          "line": 148,
+          "declaration": "pub struct FreshConnectionsService"
+        },
+        {
+          "line": 163,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, ingestor: std::sync::Arc<dyn TimelineIngestor>, google_client_id: Option<String>, google_client_secret: Option<String>, core_api_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        },
+        {
+          "line": 206,
+          "declaration": "pub fn list_connectors(&self) -> Vec<ConnectorDescriptor>"
+        },
+        {
+          "line": 253,
+          "declaration": "pub async fn list_connections( &self, user_id: Uuid, ) -> Result<Vec<ConnectionItem>, FreshConnectionError>"
+        },
+        {
+          "line": 281,
+          "declaration": "pub async fn start( &self, user_id: Uuid, req: StartConnectionRequest, ) -> Result<StartConnectionResponse, FreshConnectionError>"
+        },
+        {
+          "line": 422,
+          "declaration": "pub async fn get_setup_status( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<SetupStatusResponse, FreshConnectionError>"
+        },
+        {
+          "line": 444,
+          "declaration": "pub async fn update_preferences( &self, user_id: Uuid, connection_id: Uuid, req: PreferencesRequest, ) -> Result<ConnectionItem, FreshConnectionError>"
+        },
+        {
+          "line": 478,
+          "declaration": "pub async fn refresh( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<RefreshResponse, FreshConnectionError>"
+        },
+        {
+          "line": 534,
+          "declaration": "pub async fn disconnect( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 564,
+          "declaration": "pub async fn handle_google_callback( &self, code: &str, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 709,
+          "declaration": "pub async fn sync_google_calendar( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 838,
+          "declaration": "pub async fn sync_playstation( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1002,
+          "declaration": "pub async fn handle_food_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1278,
+          "declaration": "pub async fn cancel_setup( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1286,
+          "declaration": "pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1290,
+          "declaration": "pub async fn assistant_read( &self, user_id: Uuid, connector: &str, limit: usize, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1508,
+          "declaration": "pub async fn handle_personal_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1657,
+          "declaration": "pub async fn sync_personal( &self, user_id: Uuid, id: Uuid, connector: &str, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1690,
+          "declaration": "pub async fn read_personal( &self, user_id: Uuid, id: Uuid, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1739,
+          "declaration": "pub async fn import_youtube_history( &self, user_id: Uuid, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1770,
+          "declaration": "pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 36,
+          "declaration": "pub id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 37,
+          "declaration": "pub name: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 38,
+          "declaration": "pub description: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 39,
+          "declaration": "pub supported_features: Vec<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 40,
+          "declaration": "pub auth_type: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 41,
+          "declaration": "pub available: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 46,
+          "declaration": "pub id: Uuid,",
+          "kind": "public_field"
+        },
+        {
+          "line": 47,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 48,
+          "declaration": "pub account_display_id: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 49,
+          "declaration": "pub authorization_state: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 50,
+          "declaration": "pub sync_timeline: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 51,
+          "declaration": "pub assistant_read: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 52,
+          "declaration": "pub last_synced_at: Option<DateTime<Utc>>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 53,
+          "declaration": "pub failure_code: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 54,
+          "declaration": "pub created_at: DateTime<Utc>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 59,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 60,
+          "declaration": "pub npsso: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 61,
+          "declaration": "pub consent: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 66,
+          "declaration": "pub setup_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 67,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 68,
+          "declaration": "pub authorization_url: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 69,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 74,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 75,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 76,
+          "declaration": "pub error: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 81,
+          "declaration": "pub sync_timeline: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 82,
+          "declaration": "pub assistant_read: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 87,
+          "declaration": "pub refreshed: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 88,
+          "declaration": "pub spans_created: usize,",
+          "kind": "public_field"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn game_history(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _games: &[PlayStationGame],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
+          "kind": "public_trait_contract"
+        }
+      ],
+      "public_after": [
+        {
+          "line": 17,
+          "declaration": "pub enum FreshConnectionError"
+        },
+        {
+          "line": 35,
+          "declaration": "pub struct ConnectorDescriptor"
+        },
+        {
+          "line": 45,
+          "declaration": "pub struct ConnectionItem"
+        },
+        {
+          "line": 58,
+          "declaration": "pub struct StartConnectionRequest"
+        },
+        {
+          "line": 65,
+          "declaration": "pub struct StartConnectionResponse"
+        },
+        {
+          "line": 73,
+          "declaration": "pub struct SetupStatusResponse"
+        },
+        {
+          "line": 80,
+          "declaration": "pub struct PreferencesRequest"
+        },
+        {
+          "line": 86,
+          "declaration": "pub struct RefreshResponse"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync"
+        },
+        {
+          "line": 139,
+          "declaration": "pub struct FreshConnectionsService"
+        },
+        {
+          "line": 154,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, ingestor: std::sync::Arc<dyn TimelineIngestor>, google_client_id: Option<String>, google_client_secret: Option<String>, core_api_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        },
+        {
+          "line": 197,
+          "declaration": "pub fn list_connectors(&self) -> Vec<ConnectorDescriptor>"
+        },
+        {
+          "line": 244,
+          "declaration": "pub async fn list_connections( &self, user_id: Uuid, ) -> Result<Vec<ConnectionItem>, FreshConnectionError>"
+        },
+        {
+          "line": 272,
+          "declaration": "pub async fn start( &self, user_id: Uuid, req: StartConnectionRequest, ) -> Result<StartConnectionResponse, FreshConnectionError>"
+        },
+        {
+          "line": 413,
+          "declaration": "pub async fn get_setup_status( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<SetupStatusResponse, FreshConnectionError>"
+        },
+        {
+          "line": 435,
+          "declaration": "pub async fn update_preferences( &self, user_id: Uuid, connection_id: Uuid, req: PreferencesRequest, ) -> Result<ConnectionItem, FreshConnectionError>"
+        },
+        {
+          "line": 469,
+          "declaration": "pub async fn refresh( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<RefreshResponse, FreshConnectionError>"
+        },
+        {
+          "line": 525,
+          "declaration": "pub async fn disconnect( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 555,
+          "declaration": "pub async fn handle_google_callback( &self, code: &str, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 700,
+          "declaration": "pub async fn sync_google_calendar( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 829,
+          "declaration": "pub async fn sync_playstation( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 989,
+          "declaration": "pub async fn handle_food_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1265,
+          "declaration": "pub async fn cancel_setup( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1273,
+          "declaration": "pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1277,
+          "declaration": "pub async fn assistant_read( &self, user_id: Uuid, connector: &str, limit: usize, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1495,
+          "declaration": "pub async fn handle_personal_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1644,
+          "declaration": "pub async fn sync_personal( &self, user_id: Uuid, id: Uuid, connector: &str, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1677,
+          "declaration": "pub async fn read_personal( &self, user_id: Uuid, id: Uuid, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1726,
+          "declaration": "pub async fn import_youtube_history( &self, user_id: Uuid, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1757,
+          "declaration": "pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 36,
+          "declaration": "pub id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 37,
+          "declaration": "pub name: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 38,
+          "declaration": "pub description: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 39,
+          "declaration": "pub supported_features: Vec<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 40,
+          "declaration": "pub auth_type: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 41,
+          "declaration": "pub available: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 46,
+          "declaration": "pub id: Uuid,",
+          "kind": "public_field"
+        },
+        {
+          "line": 47,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 48,
+          "declaration": "pub account_display_id: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 49,
+          "declaration": "pub authorization_state: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 50,
+          "declaration": "pub sync_timeline: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 51,
+          "declaration": "pub assistant_read: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 52,
+          "declaration": "pub last_synced_at: Option<DateTime<Utc>>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 53,
+          "declaration": "pub failure_code: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 54,
+          "declaration": "pub created_at: DateTime<Utc>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 59,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 60,
+          "declaration": "pub npsso: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 61,
+          "declaration": "pub consent: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 66,
+          "declaration": "pub setup_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 67,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 68,
+          "declaration": "pub authorization_url: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 69,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 74,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 75,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 76,
+          "declaration": "pub error: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 81,
+          "declaration": "pub sync_timeline: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 82,
+          "declaration": "pub assistant_read: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 87,
+          "declaration": "pub refreshed: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 88,
+          "declaration": "pub spans_created: usize,",
+          "kind": "public_field"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
+          "kind": "public_trait_contract"
+        }
+      ],
+      "public_removed_or_changed": [
+        "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn game_history(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _games: &[PlayStationGame],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}"
+      ],
+      "public_added_or_changed": [
+        "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}"
+      ]
+    },
+    {
+      "commit": "4379e21650a666f0b29c753d43dc19990862b183",
+      "parent": "f93cde6209937698a4ccb4914e2e35ec875d3a58",
+      "before_path": "src/accounts.rs",
+      "after_path": "src/accounts.rs",
+      "status": "M",
+      "classification": "rewritten",
+      "added_lines": "1",
+      "deleted_lines": "1",
+      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback",
+      "public_before": [
+        {
+          "line": 17,
+          "declaration": "pub enum FreshConnectionError"
+        },
+        {
+          "line": 35,
+          "declaration": "pub struct ConnectorDescriptor"
+        },
+        {
+          "line": 45,
+          "declaration": "pub struct ConnectionItem"
+        },
+        {
+          "line": 58,
+          "declaration": "pub struct StartConnectionRequest"
+        },
+        {
+          "line": 65,
+          "declaration": "pub struct StartConnectionResponse"
+        },
+        {
+          "line": 73,
+          "declaration": "pub struct SetupStatusResponse"
+        },
+        {
+          "line": 80,
+          "declaration": "pub struct PreferencesRequest"
+        },
+        {
+          "line": 86,
+          "declaration": "pub struct RefreshResponse"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync"
+        },
+        {
+          "line": 139,
+          "declaration": "pub struct FreshConnectionsService"
+        },
+        {
+          "line": 154,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, ingestor: std::sync::Arc<dyn TimelineIngestor>, google_client_id: Option<String>, google_client_secret: Option<String>, core_api_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        },
+        {
+          "line": 197,
+          "declaration": "pub fn list_connectors(&self) -> Vec<ConnectorDescriptor>"
+        },
+        {
+          "line": 244,
+          "declaration": "pub async fn list_connections( &self, user_id: Uuid, ) -> Result<Vec<ConnectionItem>, FreshConnectionError>"
+        },
+        {
+          "line": 272,
+          "declaration": "pub async fn start( &self, user_id: Uuid, req: StartConnectionRequest, ) -> Result<StartConnectionResponse, FreshConnectionError>"
+        },
+        {
+          "line": 413,
+          "declaration": "pub async fn get_setup_status( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<SetupStatusResponse, FreshConnectionError>"
+        },
+        {
+          "line": 435,
+          "declaration": "pub async fn update_preferences( &self, user_id: Uuid, connection_id: Uuid, req: PreferencesRequest, ) -> Result<ConnectionItem, FreshConnectionError>"
+        },
+        {
+          "line": 469,
+          "declaration": "pub async fn refresh( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<RefreshResponse, FreshConnectionError>"
+        },
+        {
+          "line": 525,
+          "declaration": "pub async fn disconnect( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 555,
+          "declaration": "pub async fn handle_google_callback( &self, code: &str, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 700,
+          "declaration": "pub async fn sync_google_calendar( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 829,
+          "declaration": "pub async fn sync_playstation( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 989,
+          "declaration": "pub async fn handle_food_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1265,
+          "declaration": "pub async fn cancel_setup( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1273,
+          "declaration": "pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1277,
+          "declaration": "pub async fn assistant_read( &self, user_id: Uuid, connector: &str, limit: usize, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1495,
+          "declaration": "pub async fn handle_personal_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1644,
+          "declaration": "pub async fn sync_personal( &self, user_id: Uuid, id: Uuid, connector: &str, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1677,
+          "declaration": "pub async fn read_personal( &self, user_id: Uuid, id: Uuid, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1726,
+          "declaration": "pub async fn import_youtube_history( &self, user_id: Uuid, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1757,
+          "declaration": "pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 36,
+          "declaration": "pub id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 37,
+          "declaration": "pub name: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 38,
+          "declaration": "pub description: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 39,
+          "declaration": "pub supported_features: Vec<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 40,
+          "declaration": "pub auth_type: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 41,
+          "declaration": "pub available: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 46,
+          "declaration": "pub id: Uuid,",
+          "kind": "public_field"
+        },
+        {
+          "line": 47,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 48,
+          "declaration": "pub account_display_id: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 49,
+          "declaration": "pub authorization_state: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 50,
+          "declaration": "pub sync_timeline: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 51,
+          "declaration": "pub assistant_read: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 52,
+          "declaration": "pub last_synced_at: Option<DateTime<Utc>>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 53,
+          "declaration": "pub failure_code: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 54,
+          "declaration": "pub created_at: DateTime<Utc>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 59,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 60,
+          "declaration": "pub npsso: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 61,
+          "declaration": "pub consent: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 66,
+          "declaration": "pub setup_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 67,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 68,
+          "declaration": "pub authorization_url: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 69,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 74,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 75,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 76,
+          "declaration": "pub error: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 81,
+          "declaration": "pub sync_timeline: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 82,
+          "declaration": "pub assistant_read: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 87,
+          "declaration": "pub refreshed: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 88,
+          "declaration": "pub spans_created: usize,",
+          "kind": "public_field"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
+          "kind": "public_trait_contract"
+        }
+      ],
+      "public_after": [
+        {
+          "line": 17,
+          "declaration": "pub enum FreshConnectionError"
+        },
+        {
+          "line": 35,
+          "declaration": "pub struct ConnectorDescriptor"
+        },
+        {
+          "line": 45,
+          "declaration": "pub struct ConnectionItem"
+        },
+        {
+          "line": 58,
+          "declaration": "pub struct StartConnectionRequest"
+        },
+        {
+          "line": 65,
+          "declaration": "pub struct StartConnectionResponse"
+        },
+        {
+          "line": 73,
+          "declaration": "pub struct SetupStatusResponse"
+        },
+        {
+          "line": 80,
+          "declaration": "pub struct PreferencesRequest"
+        },
+        {
+          "line": 86,
+          "declaration": "pub struct RefreshResponse"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync"
+        },
+        {
+          "line": 139,
+          "declaration": "pub struct FreshConnectionsService"
+        },
+        {
+          "line": 154,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, ingestor: std::sync::Arc<dyn TimelineIngestor>, google_client_id: Option<String>, google_client_secret: Option<String>, core_api_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        },
+        {
+          "line": 197,
+          "declaration": "pub fn list_connectors(&self) -> Vec<ConnectorDescriptor>"
+        },
+        {
+          "line": 244,
+          "declaration": "pub async fn list_connections( &self, user_id: Uuid, ) -> Result<Vec<ConnectionItem>, FreshConnectionError>"
+        },
+        {
+          "line": 272,
+          "declaration": "pub async fn start( &self, user_id: Uuid, req: StartConnectionRequest, ) -> Result<StartConnectionResponse, FreshConnectionError>"
+        },
+        {
+          "line": 413,
+          "declaration": "pub async fn get_setup_status( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<SetupStatusResponse, FreshConnectionError>"
+        },
+        {
+          "line": 435,
+          "declaration": "pub async fn update_preferences( &self, user_id: Uuid, connection_id: Uuid, req: PreferencesRequest, ) -> Result<ConnectionItem, FreshConnectionError>"
+        },
+        {
+          "line": 469,
+          "declaration": "pub async fn refresh( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<RefreshResponse, FreshConnectionError>"
+        },
+        {
+          "line": 525,
+          "declaration": "pub async fn disconnect( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 555,
+          "declaration": "pub async fn handle_google_callback( &self, code: &str, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 700,
+          "declaration": "pub async fn sync_google_calendar( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 829,
+          "declaration": "pub async fn sync_playstation( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 989,
+          "declaration": "pub async fn handle_food_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1265,
+          "declaration": "pub async fn cancel_setup( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1273,
+          "declaration": "pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1277,
+          "declaration": "pub async fn assistant_read( &self, user_id: Uuid, connector: &str, limit: usize, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1495,
+          "declaration": "pub async fn handle_personal_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1644,
+          "declaration": "pub async fn sync_personal( &self, user_id: Uuid, id: Uuid, connector: &str, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1677,
+          "declaration": "pub async fn read_personal( &self, user_id: Uuid, id: Uuid, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1726,
+          "declaration": "pub async fn import_youtube_history( &self, user_id: Uuid, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1757,
+          "declaration": "pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 36,
+          "declaration": "pub id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 37,
+          "declaration": "pub name: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 38,
+          "declaration": "pub description: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 39,
+          "declaration": "pub supported_features: Vec<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 40,
+          "declaration": "pub auth_type: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 41,
+          "declaration": "pub available: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 46,
+          "declaration": "pub id: Uuid,",
+          "kind": "public_field"
+        },
+        {
+          "line": 47,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 48,
+          "declaration": "pub account_display_id: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 49,
+          "declaration": "pub authorization_state: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 50,
+          "declaration": "pub sync_timeline: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 51,
+          "declaration": "pub assistant_read: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 52,
+          "declaration": "pub last_synced_at: Option<DateTime<Utc>>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 53,
+          "declaration": "pub failure_code: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 54,
+          "declaration": "pub created_at: DateTime<Utc>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 59,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 60,
+          "declaration": "pub npsso: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 61,
+          "declaration": "pub consent: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 66,
+          "declaration": "pub setup_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 67,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 68,
+          "declaration": "pub authorization_url: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 69,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 74,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 75,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 76,
+          "declaration": "pub error: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 81,
+          "declaration": "pub sync_timeline: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 82,
+          "declaration": "pub assistant_read: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 87,
+          "declaration": "pub refreshed: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 88,
+          "declaration": "pub spans_created: usize,",
+          "kind": "public_field"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
+          "kind": "public_trait_contract"
+        }
+      ],
+      "public_removed_or_changed": [],
+      "public_added_or_changed": []
+    },
+    {
+      "commit": "6f43efb0ad984cd17c3b37ba4ddf73b850fb5e37",
+      "parent": "4379e21650a666f0b29c753d43dc19990862b183",
+      "before_path": "src/accounts.rs",
+      "after_path": "src/accounts.rs",
+      "status": "M",
+      "classification": "rewritten",
+      "added_lines": "13",
+      "deleted_lines": "0",
+      "disposition": "Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback",
+      "public_before": [
+        {
+          "line": 17,
+          "declaration": "pub enum FreshConnectionError"
+        },
+        {
+          "line": 35,
+          "declaration": "pub struct ConnectorDescriptor"
+        },
+        {
+          "line": 45,
+          "declaration": "pub struct ConnectionItem"
+        },
+        {
+          "line": 58,
+          "declaration": "pub struct StartConnectionRequest"
+        },
+        {
+          "line": 65,
+          "declaration": "pub struct StartConnectionResponse"
+        },
+        {
+          "line": 73,
+          "declaration": "pub struct SetupStatusResponse"
+        },
+        {
+          "line": 80,
+          "declaration": "pub struct PreferencesRequest"
+        },
+        {
+          "line": 86,
+          "declaration": "pub struct RefreshResponse"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync"
+        },
+        {
+          "line": 139,
+          "declaration": "pub struct FreshConnectionsService"
+        },
+        {
+          "line": 154,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, ingestor: std::sync::Arc<dyn TimelineIngestor>, google_client_id: Option<String>, google_client_secret: Option<String>, core_api_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        },
+        {
+          "line": 197,
+          "declaration": "pub fn list_connectors(&self) -> Vec<ConnectorDescriptor>"
+        },
+        {
+          "line": 244,
+          "declaration": "pub async fn list_connections( &self, user_id: Uuid, ) -> Result<Vec<ConnectionItem>, FreshConnectionError>"
+        },
+        {
+          "line": 272,
+          "declaration": "pub async fn start( &self, user_id: Uuid, req: StartConnectionRequest, ) -> Result<StartConnectionResponse, FreshConnectionError>"
+        },
+        {
+          "line": 413,
+          "declaration": "pub async fn get_setup_status( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<SetupStatusResponse, FreshConnectionError>"
+        },
+        {
+          "line": 435,
+          "declaration": "pub async fn update_preferences( &self, user_id: Uuid, connection_id: Uuid, req: PreferencesRequest, ) -> Result<ConnectionItem, FreshConnectionError>"
+        },
+        {
+          "line": 469,
+          "declaration": "pub async fn refresh( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<RefreshResponse, FreshConnectionError>"
+        },
+        {
+          "line": 525,
+          "declaration": "pub async fn disconnect( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 555,
+          "declaration": "pub async fn handle_google_callback( &self, code: &str, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 700,
+          "declaration": "pub async fn sync_google_calendar( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 829,
+          "declaration": "pub async fn sync_playstation( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 989,
+          "declaration": "pub async fn handle_food_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1265,
+          "declaration": "pub async fn cancel_setup( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1273,
+          "declaration": "pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1277,
+          "declaration": "pub async fn assistant_read( &self, user_id: Uuid, connector: &str, limit: usize, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1495,
+          "declaration": "pub async fn handle_personal_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1644,
+          "declaration": "pub async fn sync_personal( &self, user_id: Uuid, id: Uuid, connector: &str, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1677,
+          "declaration": "pub async fn read_personal( &self, user_id: Uuid, id: Uuid, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1726,
+          "declaration": "pub async fn import_youtube_history( &self, user_id: Uuid, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1757,
+          "declaration": "pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 36,
+          "declaration": "pub id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 37,
+          "declaration": "pub name: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 38,
+          "declaration": "pub description: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 39,
+          "declaration": "pub supported_features: Vec<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 40,
+          "declaration": "pub auth_type: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 41,
+          "declaration": "pub available: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 46,
+          "declaration": "pub id: Uuid,",
+          "kind": "public_field"
+        },
+        {
+          "line": 47,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 48,
+          "declaration": "pub account_display_id: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 49,
+          "declaration": "pub authorization_state: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 50,
+          "declaration": "pub sync_timeline: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 51,
+          "declaration": "pub assistant_read: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 52,
+          "declaration": "pub last_synced_at: Option<DateTime<Utc>>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 53,
+          "declaration": "pub failure_code: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 54,
+          "declaration": "pub created_at: DateTime<Utc>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 59,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 60,
+          "declaration": "pub npsso: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 61,
+          "declaration": "pub consent: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 66,
+          "declaration": "pub setup_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 67,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 68,
+          "declaration": "pub authorization_url: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 69,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 74,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 75,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 76,
+          "declaration": "pub error: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 81,
+          "declaration": "pub sync_timeline: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 82,
+          "declaration": "pub assistant_read: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 87,
+          "declaration": "pub refreshed: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 88,
+          "declaration": "pub spans_created: usize,",
+          "kind": "public_field"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
+          "kind": "public_trait_contract"
+        }
+      ],
+      "public_after": [
+        {
+          "line": 17,
+          "declaration": "pub enum FreshConnectionError"
+        },
+        {
+          "line": 35,
+          "declaration": "pub struct ConnectorDescriptor"
+        },
+        {
+          "line": 45,
+          "declaration": "pub struct ConnectionItem"
+        },
+        {
+          "line": 58,
+          "declaration": "pub struct StartConnectionRequest"
+        },
+        {
+          "line": 65,
+          "declaration": "pub struct StartConnectionResponse"
+        },
+        {
+          "line": 73,
+          "declaration": "pub struct SetupStatusResponse"
+        },
+        {
+          "line": 80,
+          "declaration": "pub struct PreferencesRequest"
+        },
+        {
+          "line": 86,
+          "declaration": "pub struct RefreshResponse"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync"
+        },
+        {
+          "line": 148,
+          "declaration": "pub struct FreshConnectionsService"
+        },
+        {
+          "line": 163,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, ingestor: std::sync::Arc<dyn TimelineIngestor>, google_client_id: Option<String>, google_client_secret: Option<String>, core_api_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        },
+        {
+          "line": 206,
+          "declaration": "pub fn list_connectors(&self) -> Vec<ConnectorDescriptor>"
+        },
+        {
+          "line": 253,
+          "declaration": "pub async fn list_connections( &self, user_id: Uuid, ) -> Result<Vec<ConnectionItem>, FreshConnectionError>"
+        },
+        {
+          "line": 281,
+          "declaration": "pub async fn start( &self, user_id: Uuid, req: StartConnectionRequest, ) -> Result<StartConnectionResponse, FreshConnectionError>"
+        },
+        {
+          "line": 422,
+          "declaration": "pub async fn get_setup_status( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<SetupStatusResponse, FreshConnectionError>"
+        },
+        {
+          "line": 444,
+          "declaration": "pub async fn update_preferences( &self, user_id: Uuid, connection_id: Uuid, req: PreferencesRequest, ) -> Result<ConnectionItem, FreshConnectionError>"
+        },
+        {
+          "line": 478,
+          "declaration": "pub async fn refresh( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<RefreshResponse, FreshConnectionError>"
+        },
+        {
+          "line": 534,
+          "declaration": "pub async fn disconnect( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 564,
+          "declaration": "pub async fn handle_google_callback( &self, code: &str, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 709,
+          "declaration": "pub async fn sync_google_calendar( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 838,
+          "declaration": "pub async fn sync_playstation( &self, user_id: Uuid, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1002,
+          "declaration": "pub async fn handle_food_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1278,
+          "declaration": "pub async fn cancel_setup( &self, user_id: Uuid, setup_id: Uuid, ) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1286,
+          "declaration": "pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 1290,
+          "declaration": "pub async fn assistant_read( &self, user_id: Uuid, connector: &str, limit: usize, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1508,
+          "declaration": "pub async fn handle_personal_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
+        },
+        {
+          "line": 1657,
+          "declaration": "pub async fn sync_personal( &self, user_id: Uuid, id: Uuid, connector: &str, ) -> Result<usize, FreshConnectionError>"
+        },
+        {
+          "line": 1690,
+          "declaration": "pub async fn read_personal( &self, user_id: Uuid, id: Uuid, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1739,
+          "declaration": "pub async fn import_youtube_history( &self, user_id: Uuid, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
+        },
+        {
+          "line": 1770,
+          "declaration": "pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError>"
+        },
+        {
+          "line": 36,
+          "declaration": "pub id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 37,
+          "declaration": "pub name: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 38,
+          "declaration": "pub description: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 39,
+          "declaration": "pub supported_features: Vec<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 40,
+          "declaration": "pub auth_type: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 41,
+          "declaration": "pub available: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 46,
+          "declaration": "pub id: Uuid,",
+          "kind": "public_field"
+        },
+        {
+          "line": 47,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 48,
+          "declaration": "pub account_display_id: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 49,
+          "declaration": "pub authorization_state: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 50,
+          "declaration": "pub sync_timeline: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 51,
+          "declaration": "pub assistant_read: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 52,
+          "declaration": "pub last_synced_at: Option<DateTime<Utc>>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 53,
+          "declaration": "pub failure_code: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 54,
+          "declaration": "pub created_at: DateTime<Utc>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 59,
+          "declaration": "pub connector_id: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 60,
+          "declaration": "pub npsso: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 61,
+          "declaration": "pub consent: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 66,
+          "declaration": "pub setup_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 67,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 68,
+          "declaration": "pub authorization_url: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 69,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 74,
+          "declaration": "pub status: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 75,
+          "declaration": "pub connection_id: Option<Uuid>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 76,
+          "declaration": "pub error: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 81,
+          "declaration": "pub sync_timeline: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 82,
+          "declaration": "pub assistant_read: Option<bool>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 87,
+          "declaration": "pub refreshed: bool,",
+          "kind": "public_field"
+        },
+        {
+          "line": 88,
+          "declaration": "pub spans_created: usize,",
+          "kind": "public_field"
+        },
+        {
+          "line": 93,
+          "declaration": "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn game_history(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _games: &[PlayStationGame],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
+          "kind": "public_trait_contract"
+        }
+      ],
+      "public_removed_or_changed": [
+        "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}"
+      ],
+      "public_added_or_changed": [
+        "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn game_history(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _games: &[PlayStationGame],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}"
+      ]
     }
   ],
   "core_retirement": [
@@ -38185,7 +39864,7 @@
       "path": "src/connection_ingestion_tests.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [],
       "public_after": []
     },
@@ -38195,7 +39874,7 @@
       "path": "Dockerfile",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "95eb1c84643e13141f1743b4d261edc011b0bd3f",
@@ -38203,7 +39882,7 @@
       "path": "Dockerfile.worker",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "7dca9f2fa5e4a201fb4573b1b32c99296f25b2b8",
@@ -38211,7 +39890,7 @@
       "path": "Cargo.lock",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "7dca9f2fa5e4a201fb4573b1b32c99296f25b2b8",
@@ -38219,7 +39898,7 @@
       "path": "Cargo.toml",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "7dca9f2fa5e4a201fb4573b1b32c99296f25b2b8",
@@ -38227,7 +39906,7 @@
       "path": "services/api/cors.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 29,
@@ -38255,7 +39934,7 @@
       "path": "services/api/main.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [],
       "public_after": []
     },
@@ -38265,7 +39944,7 @@
       "path": "services/api/openapi.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 47,
@@ -38293,7 +39972,7 @@
       "path": "services/api/router.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 44,
@@ -38313,7 +39992,7 @@
       "path": "services/api/routes/connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 18,
@@ -38461,7 +40140,7 @@
       "path": "src/agents/conversation.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 19,
@@ -38735,7 +40414,7 @@
       "path": "src/agents/tools/connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 7,
@@ -38803,7 +40482,7 @@
       "path": "src/agents/tools/mod.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 1,
@@ -38923,7 +40602,7 @@
       "path": "src/agents/tools/wiz.rs",
       "status": "A",
       "classification": "newly added",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [],
       "public_after": [
         {
@@ -38991,7 +40670,7 @@
       "path": "src/application/spans.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 17,
@@ -39067,7 +40746,7 @@
       "path": "src/connection_ingestion_tests.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [],
       "public_after": []
     },
@@ -39077,7 +40756,7 @@
       "path": "src/fresh_connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 7,
@@ -39113,7 +40792,7 @@
       "path": "src/map_scene.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 5,
@@ -39531,7 +41210,7 @@
       "path": "src/storage/spans.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 20,
@@ -39615,7 +41294,7 @@
       "path": "src/agents/conversation.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 19,
@@ -39893,7 +41572,7 @@
       "path": "src/agents/tools/wiz.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 9,
@@ -40019,7 +41698,7 @@
       "path": "src/fresh_connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 7,
@@ -40055,7 +41734,7 @@
       "path": "Cargo.lock",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "a81c26bdcc0ea03069d174ea4d980411681e0023",
@@ -40063,7 +41742,7 @@
       "path": "Cargo.toml",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "a81c26bdcc0ea03069d174ea4d980411681e0023",
@@ -40071,7 +41750,7 @@
       "path": "src/fresh_connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 7,
@@ -40107,7 +41786,7 @@
       "path": "Cargo.lock",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "02bb419a36961afaea622bfe4f96482879448c4b",
@@ -40115,7 +41794,7 @@
       "path": "Cargo.toml",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "1ea00898bb623675aeca07751f7ecf7fc640e736",
@@ -40123,7 +41802,7 @@
       "path": "services/api/routes/callback_page.rs",
       "status": "A",
       "classification": "newly added",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [],
       "public_after": [
         {
@@ -40138,7 +41817,7 @@
       "path": "services/api/routes/connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 18,
@@ -40312,7 +41991,7 @@
       "path": "services/api/routes/mod.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 4,
@@ -40488,7 +42167,7 @@
       "path": "Cargo.lock",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "ffc9010ebac63d6ac73485588faf2e2bf609402d",
@@ -40496,7 +42175,7 @@
       "path": "Cargo.toml",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable"
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
     },
     {
       "commit": "b192c38aea8cc6eada443088ec25de7edd046722",
@@ -40504,7 +42183,7 @@
       "path": "src/fresh_connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 7,
@@ -40540,7 +42219,7 @@
       "path": "src/fresh_connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 7,
@@ -40576,7 +42255,7 @@
       "path": "src/fresh_connections.rs",
       "status": "M",
       "classification": "rewritten",
-      "disposition": "Retained; shared implementations delegated to Connections where applicable",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
       "public_before": [
         {
           "line": 7,
@@ -40602,6 +42281,230 @@
         },
         {
           "line": 728,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, hub: Option<crate::realtime::UserEventHub>, client: Option<String>, secret: Option<String>, core_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        }
+      ]
+    },
+    {
+      "commit": "50f5aa56ad9a98a70c114c9fc16c2c59cfbc7c9e",
+      "parent": "9491212314c7b2919b9123310805de3439dc61b9",
+      "path": "services/api/auth.rs",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
+      "public_before": [
+        {
+          "line": 60,
+          "declaration": "pub async fn extract_actor( State(pool): State<PgPool>, mut req: Request, next: Next, ) -> Result<Response, StatusCode>"
+        }
+      ],
+      "public_after": [
+        {
+          "line": 60,
+          "declaration": "pub async fn extract_actor( State(pool): State<PgPool>, mut req: Request, next: Next, ) -> Result<Response, StatusCode>"
+        }
+      ]
+    },
+    {
+      "commit": "50f5aa56ad9a98a70c114c9fc16c2c59cfbc7c9e",
+      "parent": "9491212314c7b2919b9123310805de3439dc61b9",
+      "path": "services/api/identity_token.rs",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable",
+      "public_before": [
+        {
+          "line": 18,
+          "declaration": "pub struct VerifiedIdentity"
+        },
+        {
+          "line": 79,
+          "declaration": "pub fn verify_hs256_jwt(token: &str, secret: Option<&str>) -> Result<VerifiedIdentity, StatusCode>"
+        },
+        {
+          "line": 104,
+          "declaration": "pub async fn verify_id_token(token: &str) -> Result<VerifiedIdentity, StatusCode>"
+        },
+        {
+          "line": 201,
+          "declaration": "pub fn verify_es256_components( token: &str, x: &str, y: &str, expected_issuer: &str, ) -> Result<VerifiedIdentity, StatusCode>"
+        },
+        {
+          "line": 19,
+          "declaration": "pub issuer: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 20,
+          "declaration": "pub subject: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 21,
+          "declaration": "pub email: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 22,
+          "declaration": "pub name: Option<String>,",
+          "kind": "public_field"
+        }
+      ],
+      "public_after": [
+        {
+          "line": 18,
+          "declaration": "pub struct VerifiedIdentity"
+        },
+        {
+          "line": 84,
+          "declaration": "pub fn verify_hs256_jwt(token: &str, secret: Option<&str>) -> Result<VerifiedIdentity, StatusCode>"
+        },
+        {
+          "line": 109,
+          "declaration": "pub async fn verify_id_token(token: &str) -> Result<VerifiedIdentity, StatusCode>"
+        },
+        {
+          "line": 206,
+          "declaration": "pub fn verify_es256_components( token: &str, x: &str, y: &str, expected_issuer: &str, ) -> Result<VerifiedIdentity, StatusCode>"
+        },
+        {
+          "line": 19,
+          "declaration": "pub issuer: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 20,
+          "declaration": "pub subject: String,",
+          "kind": "public_field"
+        },
+        {
+          "line": 21,
+          "declaration": "pub email: Option<String>,",
+          "kind": "public_field"
+        },
+        {
+          "line": 22,
+          "declaration": "pub name: Option<String>,",
+          "kind": "public_field"
+        }
+      ]
+    },
+    {
+      "commit": "7c840e86f16e8a33812a1f49a1e0c3e6046e4be4",
+      "parent": "50f5aa56ad9a98a70c114c9fc16c2c59cfbc7c9e",
+      "path": "Cargo.lock",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
+    },
+    {
+      "commit": "7c840e86f16e8a33812a1f49a1e0c3e6046e4be4",
+      "parent": "50f5aa56ad9a98a70c114c9fc16c2c59cfbc7c9e",
+      "path": "Cargo.toml",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
+    },
+    {
+      "commit": "7c840e86f16e8a33812a1f49a1e0c3e6046e4be4",
+      "parent": "50f5aa56ad9a98a70c114c9fc16c2c59cfbc7c9e",
+      "path": "src/fresh_connections.rs",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Superseded: preserve labelled observed ranges; no deletion of history or synthetic evenly-spaced sessions",
+      "public_before": [
+        {
+          "line": 7,
+          "declaration": "pub use vox_connections::accounts::*;"
+        },
+        {
+          "line": 720,
+          "declaration": "pub struct FreshConnectionsService(vox_connections::accounts::FreshConnectionsService)"
+        },
+        {
+          "line": 728,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, hub: Option<crate::realtime::UserEventHub>, client: Option<String>, secret: Option<String>, core_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        }
+      ],
+      "public_after": [
+        {
+          "line": 7,
+          "declaration": "pub use vox_connections::accounts::*;"
+        },
+        {
+          "line": 642,
+          "declaration": "pub struct FreshConnectionsService(vox_connections::accounts::FreshConnectionsService)"
+        },
+        {
+          "line": 650,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, hub: Option<crate::realtime::UserEventHub>, client: Option<String>, secret: Option<String>, core_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        }
+      ]
+    },
+    {
+      "commit": "7b20d426d64056b876916f5b1b748c748a1a5c04",
+      "parent": "7c840e86f16e8a33812a1f49a1e0c3e6046e4be4",
+      "path": "Cargo.lock",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
+    },
+    {
+      "commit": "7b20d426d64056b876916f5b1b748c748a1a5c04",
+      "parent": "7c840e86f16e8a33812a1f49a1e0c3e6046e4be4",
+      "path": "Cargo.toml",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
+    },
+    {
+      "commit": "658387e57b986947f50dbe71a58f9b3d5c07ea8a",
+      "parent": "7b20d426d64056b876916f5b1b748c748a1a5c04",
+      "path": "Cargo.lock",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
+    },
+    {
+      "commit": "658387e57b986947f50dbe71a58f9b3d5c07ea8a",
+      "parent": "7b20d426d64056b876916f5b1b748c748a1a5c04",
+      "path": "Cargo.toml",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable"
+    },
+    {
+      "commit": "658387e57b986947f50dbe71a58f9b3d5c07ea8a",
+      "parent": "7b20d426d64056b876916f5b1b748c748a1a5c04",
+      "path": "src/fresh_connections.rs",
+      "status": "M",
+      "classification": "rewritten",
+      "disposition": "Superseded: preserve labelled observed ranges; no deletion of history or synthetic evenly-spaced sessions",
+      "public_before": [
+        {
+          "line": 7,
+          "declaration": "pub use vox_connections::accounts::*;"
+        },
+        {
+          "line": 642,
+          "declaration": "pub struct FreshConnectionsService(vox_connections::accounts::FreshConnectionsService)"
+        },
+        {
+          "line": 650,
+          "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, hub: Option<crate::realtime::UserEventHub>, client: Option<String>, secret: Option<String>, core_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
+        }
+      ],
+      "public_after": [
+        {
+          "line": 9,
+          "declaration": "pub use vox_connections::accounts::*;"
+        },
+        {
+          "line": 746,
+          "declaration": "pub struct FreshConnectionsService(vox_connections::accounts::FreshConnectionsService)"
+        },
+        {
+          "line": 754,
           "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, hub: Option<crate::realtime::UserEventHub>, client: Option<String>, secret: Option<String>, core_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
         }
       ]

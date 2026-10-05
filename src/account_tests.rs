@@ -1554,3 +1554,53 @@ fn crypto_compatibility_adapter_preserves_ciphertext_and_associated_data() {
     assert_eq!(old.open(aad, &fresh).unwrap(), "protected");
     assert!(old.open(b"other:provider", &fresh).is_err());
 }
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn standalone_curated_upgrade_preserves_ids_credentials_and_does_not_grant_access() {
+    let (svc, user, id) = fixture().await;
+    // Model the curated-only schema, keeping its original constraint name.
+    sqlx::raw_sql("DROP FUNCTION project_curated_connection() CASCADE; DROP FUNCTION revoke_curated_credentials() CASCADE; ALTER TABLE vox_connections DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connection_setups DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connections ADD CONSTRAINT vox_connections_user_connector_unique UNIQUE(user_id,connector_id);")
+        .execute(&svc.pool).await.unwrap();
+    let cipher = svc
+        .cipher()
+        .unwrap()
+        .seal(
+            format!("{user}:google_calendar").as_bytes(),
+            "retained-native-token",
+        )
+        .unwrap();
+    sqlx::query("UPDATE vox_connections SET access_ciphertext=$1 WHERE id=$2")
+        .bind(&cipher)
+        .bind(id)
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../schema/account-scope-upgrade.sql"))
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../schema/account-authority.sql"))
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    let row =
+        sqlx::query("SELECT id,user_context_id,access_ciphertext FROM vox_connections WHERE id=$1")
+            .bind(id)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    assert_eq!(row.get::<Uuid, _>("id"), id);
+    assert_eq!(row.get::<Uuid, _>("user_context_id"), user);
+    assert_eq!(row.get::<Vec<u8>, _>("access_ciphertext"), cipher);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM agent_capability_grants WHERE connection_id=$1"
+        )
+        .bind(id)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap(),
+        0
+    );
+}

@@ -44,7 +44,7 @@ The [architecture review (2026-09-27)](docs/architecture-review-2026-09-27.md) r
 
 The PlayStation provider connects a PSN account to read PS5 and PS4 game activity through a community integration. It verifies the account against Sony, exchanges the NPSSO session token without storing it, and encrypts access and refresh tokens. Game reads provide cumulative playtime and provider first/last-played timestamps; they do not provide exact session boundaries.
 
-In Vox, Core consumes this crate directly. Core API handles linking and manual refresh, and Core Worker captures new playtime once a day. This flow does not require a separate `vox-connections-service` deployment. The standalone service endpoints below do not expose Core's PlayStation linking or span-capture routes.
+In Vox, Core consumes this crate directly. Core API handles linking and manual refresh, and Core Worker captures new playtime through the curated account worker every 30 minutes (the legacy platform capture entry point remains available). This flow does not require a separate `vox-connections-service` deployment. The standalone service endpoints below do not expose Core's PlayStation linking or span-capture routes.
 
 Independent hosts must apply [`schema/playstation.sql`](schema/playstation.sql) after the connector schema and supply a credential encryption key when constructing `PlayStationAccounts`. Vox Core supplies its own migration and `VOX_CREDENTIAL_KEY`. Disconnecting deletes stored PlayStation credentials; linking alone creates no agent grants.
 

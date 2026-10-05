@@ -1,10 +1,10 @@
 # Recovery inventory
 
-Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `4eafba6893bfa351aafe3d5ff571042ffeaacf3d`.
+Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `6f43efb0ad984cd17c3b37ba4ddf73b850fb5e37`.
 
-This inventory records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.
+This inventory records the original five commits and four subsequently published Connections commits, plus every corresponding Core change. It records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.
 
-The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these six commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.
+The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these nine commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.
 
 ## Per-commit file changes
 
@@ -51,7 +51,7 @@ The author’s apparent intent was a curated native account/timeline replacement
 | `schema/setup.sql` | deleted | 0 / 20 | Restored from baseline |
 | `schema/skill-content.sql` | deleted | 0 / 17 | Restored from baseline |
 | `src/account_tests.rs` | newly added | 790 / 0 | Retained with current behavior |
-| `src/accounts.rs` | newly added | 1167 / 0 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant |
+| `src/accounts.rs` | newly added | 1167 / 0 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
 | `src/bin/google_read_mcp.rs` | deleted | 0 / 13 | Restored from baseline |
 | `src/bin/server.rs` | deleted | 0 / 46 | Restored from baseline |
 | `src/bin/vox.rs` | deleted | 0 / 259 | Restored from baseline |
@@ -109,7 +109,7 @@ The author’s apparent intent was a curated native account/timeline replacement
 
 | File | Classification | Added / deleted | Recovery disposition |
 | --- | --- | --- | --- |
-| `src/accounts.rs` | rewritten | 13 / 0 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant |
+| `src/accounts.rs` | rewritten | 13 / 0 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
 
 ### e759fbe — Add food delivery and personal integrations, connection account updates
 
@@ -119,7 +119,7 @@ The author’s apparent intent was a curated native account/timeline replacement
 | `docs/food-connections.md` | newly added | 54 / 0 | Retained with current behavior |
 | `docs/personal-integrations.md` | newly added | 46 / 0 | Retained with current behavior |
 | `src/account_tests.rs` | rewritten | 416 / 0 | Retained with current behavior |
-| `src/accounts.rs` | rewritten | 773 / 70 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant |
+| `src/accounts.rs` | rewritten | 773 / 70 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
 | `src/providers/food_delivery.rs` | newly added | 648 / 0 | Retained with current behavior |
 | `src/providers/food_oauth.rs` | newly added | 145 / 0 | Retained with current behavior |
 | `src/providers/mod.rs` | rewritten | 7 / 0 | Combined: old public surface plus new provider/account behavior |
@@ -129,7 +129,7 @@ The author’s apparent intent was a curated native account/timeline replacement
 
 | File | Classification | Added / deleted | Recovery disposition |
 | --- | --- | --- | --- |
-| `src/accounts.rs` | moved/refactored | 9 / 37 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant |
+| `src/accounts.rs` | moved/refactored | 9 / 37 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
 | `src/providers/food_delivery.rs` | moved/refactored | 55 / 215 | Retained with current behavior |
 | `src/providers/food_oauth.rs` | moved/refactored | 1 / 1 | Retained with current behavior |
 | `src/providers/mod.rs` | moved/refactored | 2 / 0 | Combined: old public surface plus new provider/account behavior |
@@ -154,6 +154,24 @@ The author’s apparent intent was a curated native account/timeline replacement
 | `src/account_tests.rs` | rewritten | 0 / 1 | Retained with current behavior |
 | `src/providers/personal.rs` | rewritten | 2 / 8 | Retained with current behavior |
 
+### f93cde6 — PlayStation: sync every 10 minutes; drop first/last-played history
+
+| File | Classification | Added / deleted | Recovery disposition |
+| --- | --- | --- | --- |
+| `src/accounts.rs` | rewritten | 1 / 14 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
+
+### 4379e21 — PlayStation: sync every 30 minutes
+
+| File | Classification | Added / deleted | Recovery disposition |
+| --- | --- | --- | --- |
+| `src/accounts.rs` | rewritten | 1 / 1 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
+
+### 6f43efb — PlayStation: pass game history to the ingestor again (estimated sessions)
+
+| File | Classification | Added / deleted | Recovery disposition |
+| --- | --- | --- | --- |
+| `src/accounts.rs` | rewritten | 13 / 0 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
+
 ## Public API changes
 
 Complete exact signatures, re-exports and source locations for every changed Rust file are in [recovery-inventory.json](recovery-inventory.json). Changed signatures appear once as a removal and once as an addition. This is an exact source declaration inventory, not a claim that each declaration was reachable through every old module export.
@@ -162,7 +180,7 @@ Recovery restores all former module paths and provider service exports. Curated 
 
 ## Core correspondence
 
-Core baseline: parent of `e4a9b96`; recovery includes upstream through `9491212`. Native connection APIs, worker scheduling, WiZ, map tools, notification delivery, new OAuth callback presentation and personal ingestion are retained. The table below accounts for every file changed by the corresponding retirement commit.
+Core baseline: parent of `e4a9b96`; recovery includes upstream through `658387e`. Native connection APIs, worker scheduling, WiZ, map tools, notification delivery, new OAuth callback presentation and personal ingestion are retained. The table below accounts for every file changed by the corresponding retirement commit.
 
 | Core file | Recovery disposition |
 | --- | --- |
@@ -263,91 +281,121 @@ Core baseline: parent of `e4a9b96`; recovery includes upstream through `9491212`
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `src/connection_ingestion_tests.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/connection_ingestion_tests.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core 95eb1c8 — Include Core-owned bundled skills in release images
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `Dockerfile` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `Dockerfile.worker` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Dockerfile` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Dockerfile.worker` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core 7dca9f2 — Add WiZ lights agent tool, food/personal connections, bump vox-connections
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `services/api/cors.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `services/api/main.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `services/api/openapi.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `services/api/router.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `services/api/routes/connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/agents/conversation.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/agents/tools/connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/agents/tools/mod.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/agents/tools/wiz.rs` | newly added | Retained; shared implementations delegated to Connections where applicable |
-| `src/application/spans.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/connection_ingestion_tests.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/map_scene.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/storage/spans.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/cors.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/main.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/conversation.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/wiz.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/connection_ingestion_tests.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/map_scene.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core 368df63 — Fix lint and agent tool-set test for WiZ tool
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `src/agents/conversation.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/agents/tools/wiz.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/agents/conversation.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/wiz.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core a81c26b — Bump vox-connections (split Swiggy/Zomato modules), use provider_label
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core 02bb419 — Bump vox-connections: enable Swiggy by default
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core 1ea0089 — Branded OAuth callback page
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `services/api/routes/callback_page.rs` | newly added | Retained; shared implementations delegated to Connections where applicable |
-| `services/api/routes/connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `services/api/routes/mod.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `services/api/routes/callback_page.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core ffc9010 — Bump vox-connections: Spotify timeline-only
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `Cargo.lock` | rewritten | Retained; shared implementations delegated to Connections where applicable |
-| `Cargo.toml` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core b192c38 — PlayStation: drop title prefix; store game cover image on history spans
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core fc0955a — Bulk-upsert personal activity (YouTube/Spotify) in batches instead of two queries per record
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 ### Core 9491212 — PlayStation: first/last played markers; schedule observed sessions from last-played time
 
 | File | Classification | Recovery disposition |
 | --- | --- | --- |
-| `src/fresh_connections.rs` | rewritten | Retained; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 50f5aa5 — API auth: cache Google JWKS, skip signup transaction for known users
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `services/api/auth.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/identity_token.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 7c840e8 — PlayStation: sessions only; remove first/last-played markers; bump vox-connections (10-minute sync)
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Superseded: preserve labelled observed ranges; no deletion of history or synthetic evenly-spaced sessions |
+
+### Core 7b20d42 — Bump vox-connections: PlayStation 30-minute sync
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 658387e — PlayStation: estimated sessions from totals, spread evenly between first and last played
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Superseded: preserve labelled observed ranges; no deletion of history or synthetic evenly-spaced sessions |
 
 
 ## Data that the code restoration cannot recover

@@ -5,7 +5,7 @@ parser=argparse.ArgumentParser(description='Reproduce recovery file and public-d
 parser.add_argument('--core',type=Path,required=True)
 args=parser.parse_args()
 r=Path(__file__).resolve().parents[1];core=args.core.resolve()
-shas=['61073aa1007870f573d35ebb5285dfe9ee5d98c1','da37dcb2082986e8cc1f34c2d9d9d15daacc5dae','e759fbe7ba4be9127d8a533b4c5a9f69d342cef1','9bbf2d4fbcbb260fab6aae15de17fc575ee09075','e4d108df64413d19521f968d940f94ddeab8900b','4eafba6893bfa351aafe3d5ff571042ffeaacf3d']
+shas=['61073aa1007870f573d35ebb5285dfe9ee5d98c1','da37dcb2082986e8cc1f34c2d9d9d15daacc5dae','e759fbe7ba4be9127d8a533b4c5a9f69d342cef1','9bbf2d4fbcbb260fab6aae15de17fc575ee09075','e4d108df64413d19521f968d940f94ddeab8900b','4eafba6893bfa351aafe3d5ff571042ffeaacf3d','f93cde6','4379e21','6f43efb']
 def git(repo,*args):return subprocess.check_output(['git','-C',str(repo),*args],stderr=subprocess.DEVNULL).decode()
 def src(repo,ref,path):
  try:return git(repo,'show',ref+':'+path)
@@ -24,8 +24,9 @@ def api(text):
    depth += (text[i]=='{')-(text[i]=='}');i+=1
   out.append({'line':text[:m.start()].count('\n')+1,'declaration':text[m.start():i].strip(),'kind':'public_trait_contract'})
  return out
-records=[];lines=['# Recovery inventory','', 'Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `4eafba6893bfa351aafe3d5ff571042ffeaacf3d`.','', 'This inventory records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.','', 'The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these six commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.','', '## Per-commit file changes','']
+records=[];lines=['# Recovery inventory','', 'Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `6f43efb0ad984cd17c3b37ba4ddf73b850fb5e37`.','', 'This inventory records the original five commits and four subsequently published Connections commits, plus every corresponding Core change. It records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.','', 'The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these nine commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.','', '## Per-commit file changes','']
 for sha in shas:
+ sha=git(r,'rev-parse',sha).strip()
  parent=git(r,'rev-parse',sha+'^').strip();message=git(r,'log','-1','--format=%s',sha).strip()
  lines += [f'### {sha[:7]} — {message}', '', '| File | Classification | Added / deleted | Recovery disposition |','| --- | --- | --- | --- |']
  stat={p:(a,b) for a,b,p in [x.split('\t') for x in git(r,'diff','--numstat','--no-renames',parent,sha).splitlines()]}
@@ -38,7 +39,7 @@ for sha in shas:
   if after in ['src/providers/playstation.rs','src/providers/zomato.rs','src/providers/mod.rs','src/lib.rs','Cargo.toml','README.md','schema/README.md']:disposition='Combined: old public surface plus new provider/account behavior'
   if after=='schema/connectors.sql':disposition='Restored platform snapshot; curated schema separated into accounts.sql'
   if after=='src/crypto.rs':disposition='Shared implementation retained; old connected_apps::crypto adapter restored'
-  if after=='src/accounts.rs':disposition='Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant'
+  if after=='src/accounts.rs':disposition='Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback'
   if after=='.github/workflows/ci.yml':disposition='Both platform and account suites restored'
   prev=src(r,parent,before) if status!='A' else '';next=src(r,sha,after) if status!='D' else ''
   a,b=stat.get(after,stat.get(before,('0','0')))
@@ -49,7 +50,7 @@ for sha in shas:
    rec['public_removed_or_changed']=sorted(old-new);rec['public_added_or_changed']=sorted(new-old)
   records.append(rec);lines.append(f'| `{after}`'+(f' ← `{before}`' if before!=after else '')+f' | {kind} | {a} / {b} | {disposition} |')
  lines.append('')
-lines += ['## Public API changes','', 'Complete exact signatures, re-exports and source locations for every changed Rust file are in [recovery-inventory.json](recovery-inventory.json). Changed signatures appear once as a removal and once as an addition. This is an exact source declaration inventory, not a claim that each declaration was reachable through every old module export.','', 'Recovery restores all former module paths and provider service exports. Curated APIs retain their names but require `&impl RequestScope`; `assistant_read` and `read_personal` additionally require the selected agent key. Raw context UUID entry points are crate-private. `PlayStationGame.last_played_at` remains optional to retain provider uncertainty, and old consumers handle absent values without inventing timestamps.','', '## Core correspondence','', 'Core baseline: parent of `e4a9b96`; recovery includes upstream through `9491212`. Native connection APIs, worker scheduling, WiZ, map tools, notification delivery, new OAuth callback presentation and personal ingestion are retained. The table below accounts for every file changed by the corresponding retirement commit.','', '| Core file | Recovery disposition |','| --- | --- |']
+lines += ['## Public API changes','', 'Complete exact signatures, re-exports and source locations for every changed Rust file are in [recovery-inventory.json](recovery-inventory.json). Changed signatures appear once as a removal and once as an addition. This is an exact source declaration inventory, not a claim that each declaration was reachable through every old module export.','', 'Recovery restores all former module paths and provider service exports. Curated APIs retain their names but require `&impl RequestScope`; `assistant_read` and `read_personal` additionally require the selected agent key. Raw context UUID entry points are crate-private. `PlayStationGame.last_played_at` remains optional to retain provider uncertainty, and old consumers handle absent values without inventing timestamps.','', '## Core correspondence','', 'Core baseline: parent of `e4a9b96`; recovery includes upstream through `658387e`. Native connection APIs, worker scheduling, WiZ, map tools, notification delivery, new OAuth callback presentation and personal ingestion are retained. The table below accounts for every file changed by the corresponding retirement commit.','', '| Core file | Recovery disposition |','| --- | --- |']
 core_rows=[]
 for row in git(core,'diff','--name-status','e4a9b96^','e4a9b96').splitlines():
  status,path=row.split('\t',1)
@@ -69,7 +70,7 @@ for sha in git(core,'rev-list','--reverse','e4a9b96..origin/main').splitlines():
  parent=git(core,'rev-parse',sha+'^').strip(); message=git(core,'log','-1','--format=%s',sha).strip()
  lines += [f'### Core {sha[:7]} — {message}', '', '| File | Classification | Recovery disposition |', '| --- | --- | --- |']
  for row in git(core,'diff','--name-status','--no-renames',parent,sha).splitlines():
-  status,path=row.split('\t',1); rec={'commit':sha,'parent':parent,'path':path,'status':status,'classification':{'D':'deleted','A':'newly added','M':'rewritten'}[status],'disposition':'Retained; shared implementations delegated to Connections where applicable'}
+  status,path=row.split('\t',1); rec={'commit':sha,'parent':parent,'path':path,'status':status,'classification':{'D':'deleted','A':'newly added','M':'rewritten'}[status],'disposition':('Superseded: preserve labelled observed ranges; no deletion of history or synthetic evenly-spaced sessions' if sha.startswith(('7c840e8','658387e')) and path=='src/fresh_connections.rs' else 'Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable')}
   if path.endswith('.rs'): rec['public_before']=api(src(core,parent,path));rec['public_after']=api(src(core,sha,path))
   core_commits.append(rec); lines.append(f"| `{path}` | {rec['classification']} | {rec['disposition']} |")
  lines.append('')
