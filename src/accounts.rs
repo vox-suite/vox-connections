@@ -631,8 +631,9 @@ impl FreshConnectionsService {
                     "INSERT INTO vox_connections \
                      (user_id,user_context_id, connector_id, account_id, account_display_id, access_ciphertext, refresh_ciphertext, access_expires_at, \
                       authorization_state, sync_timeline, assistant_read, metadata, last_synced_at, next_sync_at, failure_code, failure_count, updated_at, consented_at) \
-                     VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1, 'playstation', $2, $7, $3, $4, $5, 'authorized', true, true, $6, now(), now() + interval '1 day', NULL, 0, now(), now()) \
+                     VALUES ((SELECT user_id FROM user_contexts WHERE id=$1),$1, 'playstation', $2, $7, $3, $4, $5, 'authorized', true, true, $6, now(), now(), NULL, 0, now(), now()) \
                      ON CONFLICT (user_context_id, connector_id) DO UPDATE SET \
+
                       generation = gen_random_uuid(), credential_generation=gen_random_uuid(), lease_token = NULL, lease_until = NULL, consented_at = now(), sync_timeline = true, assistant_read = true, \
               account_id = EXCLUDED.account_id, \
                       account_display_id = EXCLUDED.account_display_id, \
@@ -642,7 +643,7 @@ impl FreshConnectionsService {
                       authorization_state = 'authorized', \
                       metadata = EXCLUDED.metadata, \
                       last_synced_at = now(), \
-                      next_sync_at = now() + interval '1 day', \
+                      next_sync_at = now(), \
                       failure_code = NULL, \
                       failure_count = 0, \
                       updated_at = now() \
@@ -2075,8 +2076,8 @@ impl FreshConnectionsService {
                 _ => Ok(()),
             };
 
-            if result.is_err() {
-                tracing::warn!(connection_id=%id, "connection sync did not complete");
+            if let Err(error) = &result {
+                tracing::warn!(connection_id=%id, connector=%connector_id, error=%error, "connection sync did not complete");
             }
         }
 
