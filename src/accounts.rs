@@ -247,6 +247,14 @@ impl FreshConnectionsService {
                     && self.personal.enabled(id),
             });
         }
+        descriptors.push(ConnectorDescriptor {
+            id: "maps_timeline".into(),
+            name: "Google Maps Timeline".into(),
+            description: "Places you visited, imported from a Google Maps Timeline export.".into(),
+            supported_features: vec!["timeline_sync".into(), "assistant_read".into()],
+            auth_type: "import".into(),
+            available: self.cipher.is_some(),
+        });
         descriptors
     }
 
@@ -1314,7 +1322,7 @@ impl FreshConnectionsService {
     ) -> Result<Value, FreshConnectionError> {
         let id: Uuid = conn.get("id");
         let now = Utc::now();
-        if matches!(connector, "spotify" | "youtube" | "youtube_history") {
+        if matches!(connector, "spotify" | "youtube" | "youtube_history" | "maps_timeline") {
             return self.read_personal_claimed(user_id, id, conn).await;
         }
         let mut items = if matches!(connector, "swiggy" | "zomato") {
@@ -1692,7 +1700,7 @@ impl FreshConnectionsService {
         user_id: Uuid,
         id: Uuid,
     ) -> Result<Value, FreshConnectionError> {
-        let conn=sqlx::query("UPDATE vox_connections SET lease_token=$3,lease_until=now()+interval '15 minutes' WHERE id=$1 AND user_id=$2 AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL AND connector_id IN ('spotify','youtube','youtube_history') AND (lease_until IS NULL OR lease_until<=now()) RETURNING *").bind(id).bind(user_id).bind(Uuid::new_v4()).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
+        let conn=sqlx::query("UPDATE vox_connections SET lease_token=$3,lease_until=now()+interval '15 minutes' WHERE id=$1 AND user_id=$2 AND assistant_read AND authorization_state='authorized' AND consented_at IS NOT NULL AND connector_id IN ('spotify','youtube','youtube_history','maps_timeline') AND (lease_until IS NULL OR lease_until<=now()) RETURNING *").bind(id).bind(user_id).bind(Uuid::new_v4()).fetch_optional(&self.pool).await?.ok_or(FreshConnectionError::Unauthorized)?;
         let result = self.read_personal_claimed(user_id, id, &conn).await;
         if let Err(ref error) = result {
             self.release_failure(id, &conn, error).await?;
@@ -1706,7 +1714,7 @@ impl FreshConnectionsService {
         conn: &sqlx::postgres::PgRow,
     ) -> Result<Value, FreshConnectionError> {
         let connector: String = conn.get("connector_id");
-        let data = if connector == "youtube_history" {
+        let data = if matches!(connector.as_str(), "youtube_history" | "maps_timeline") {
             conn.get::<Value, _>("metadata")["snapshot"].clone()
         } else {
             self.personal_snapshot(user_id, &connector, conn)
@@ -1742,26 +1750,51 @@ impl FreshConnectionsService {
         history: Value,
         consent: bool,
     ) -> Result<Value, FreshConnectionError> {
+        let (items, skipped) = crate::providers::personal::parse_youtube_history(&history)?;
+        let snapshot = json!({"watch_history":items.iter().rev().take(100).collect::<Vec<_>>(),"source":"google_takeout","complete":false});
+        self.import_takeout(user_id, "youtube_history", "Google Takeout watch history", consent, items, skipped, snapshot).await
+    }
+
+    pub async fn import_maps_timeline(
+        &self,
+        user_id: Uuid,
+        history: Value,
+        consent: bool,
+    ) -> Result<Value, FreshConnectionError> {
+        let (items, skipped) = crate::providers::personal::parse_maps_timeline(&history)?;
+        let snapshot = json!({"visits":items.iter().rev().take(100).collect::<Vec<_>>(),"source":"google_takeout","complete":false});
+        self.import_takeout(user_id, "maps_timeline", "Google Maps Timeline", consent, items, skipped, snapshot).await
+    }
+
+    async fn import_takeout(
+        &self,
+        user_id: Uuid,
+        connector: &str,
+        display: &str,
+        consent: bool,
+        items: Vec<crate::providers::personal::PersonalActivity>,
+        skipped: usize,
+        snapshot: Value,
+    ) -> Result<Value, FreshConnectionError> {
         if !consent {
             return Err(FreshConnectionError::Invalid(
                 "Import consent required".into(),
             ));
         }
-        let (items, skipped) = crate::providers::personal::parse_youtube_history(&history)?;
         if items.is_empty() {
             return Err(FreshConnectionError::Invalid(
-                "No valid YouTube watch records found".into(),
+                "No valid records found".into(),
             ));
         }
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
-            .bind(format!("setup:{user_id}:youtube_history"))
+            .bind(format!("setup:{user_id}:{connector}"))
             .execute(&mut *tx)
             .await?;
-        let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,account_id,account_display_id,authorization_state,sync_timeline,assistant_read,metadata,consented_at,last_synced_at) VALUES($1,'youtube_history',$2,'Google Takeout watch history','authorized',true,true,$3,now(),now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),last_synced_at=now(),updated_at=now() RETURNING id").bind(user_id).bind(user_id.to_string()).bind(json!({"auth_type":"import","snapshot":{"watch_history":items.iter().rev().take(100).collect::<Vec<_>>(),"source":"google_takeout","complete":false}})).fetch_one(&mut *tx).await?;
+        let id:Uuid=sqlx::query_scalar(INSERT_SQL).bind(user_id).bind(user_id.to_string()).bind(json!({"auth_type":"import","snapshot":snapshot})).bind(connector).bind(display).fetch_one(&mut *tx).await?;
         let imported = self
             .ingestor
-            .personal_activity(&mut tx, user_id, id, "youtube_history", &items)
+            .personal_activity(&mut tx, user_id, id, connector, &items)
             .await?;
         tx.commit().await?;
         Ok(json!({"imported":imported,"skipped":skipped,"complete":false,"connection_id":id}))
@@ -1853,3 +1886,5 @@ fn food_sync_interval(orders: &[crate::providers::food_delivery::FoodDeliveryOrd
         900
     }
 }
+
+const INSERT_SQL: &str = "INSERT INTO vox_connections(user_id,connector_id,account_id,account_display_id,authorization_state,sync_timeline,assistant_read,metadata,consented_at,last_synced_at) VALUES($1,$4,$2,$5,'authorized',true,true,$3,now(),now()) ON CONFLICT(user_id,connector_id) DO UPDATE SET generation=gen_random_uuid(),lease_token=NULL,lease_until=NULL,authorization_state='authorized',sync_timeline=true,assistant_read=true,metadata=EXCLUDED.metadata,consented_at=now(),last_synced_at=now(),updated_at=now() RETURNING id";
