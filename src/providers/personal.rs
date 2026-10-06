@@ -476,6 +476,103 @@ pub fn parse_youtube_history(
     Ok((items, skipped))
 }
 
+fn parse_lat_lng(raw: &str) -> Option<(f64, f64)> {
+    let (lat, lng) = raw
+        .replace('°', "")
+        .split_once(',')
+        .map(|(a, b)| (a.trim().to_owned(), b.trim().to_owned()))?;
+    Some((lat.parse().ok()?, lng.parse().ok()?))
+}
+
+pub fn parse_maps_timeline(
+    history: &Value,
+) -> Result<(Vec<PersonalActivity>, usize), FreshConnectionError> {
+    let rows = history.as_array().ok_or_else(|| {
+        FreshConnectionError::Invalid(
+            "Expected a Google Maps Timeline array of place visits".into(),
+        )
+    })?;
+    if rows.len() > 20000 {
+        return Err(FreshConnectionError::Invalid(
+            "Import at most 20000 records at a time".into(),
+        ));
+    }
+    let mut items = Vec::new();
+    let mut skipped = 0;
+    for row in rows {
+        let parsed = (|| {
+            let (start, end, place_id, name, address, semantic, lat, lng) = if let Some(visit) =
+                row.get("visit")
+            {
+                let top = visit.get("topCandidate")?;
+                let (lat, lng) = parse_lat_lng(top.pointer("/placeLocation/latLng")?.as_str()?)?;
+                (
+                    row["startTime"].as_str()?,
+                    row["endTime"].as_str()?,
+                    top["placeId"].as_str(),
+                    None,
+                    None,
+                    top["semanticType"].as_str(),
+                    lat,
+                    lng,
+                )
+            } else {
+                let visit = row.get("placeVisit")?;
+                let loc = visit.get("location")?;
+                (
+                    visit.pointer("/duration/startTimestamp")?.as_str()?,
+                    visit.pointer("/duration/endTimestamp")?.as_str()?,
+                    loc["placeId"].as_str(),
+                    loc["name"].as_str(),
+                    loc["address"].as_str(),
+                    None,
+                    loc["latitudeE7"].as_f64()? / 1e7,
+                    loc["longitudeE7"].as_f64()? / 1e7,
+                )
+            };
+            if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lng) {
+                return None;
+            }
+            let start = DateTime::parse_from_rfc3339(start)
+                .ok()?
+                .with_timezone(&Utc);
+            let end = DateTime::parse_from_rfc3339(end).ok()?.with_timezone(&Utc);
+            if end < start || start > Utc::now() {
+                return None;
+            }
+            let title = name
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_owned)
+                .or_else(|| {
+                    semantic.filter(|s| *s != "UNKNOWN").map(|s| {
+                        let s = s
+                            .trim_start_matches("INFERRED_")
+                            .to_lowercase()
+                            .replace('_', " ");
+                        let mut c = s.chars();
+                        c.next()
+                            .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                            .unwrap_or(s)
+                    })
+                })
+                .unwrap_or_else(|| "Place visit".to_owned());
+            Some(PersonalActivity {
+                source_id: format!("takeout:{lat:.5},{lng:.5}:{}", start.to_rfc3339()),
+                title,
+                occurred_at: start,
+                ended_at: Some(end),
+                provider_data: json!({"action":"visit","visit_event":true,"source":"google_takeout","place_id":place_id,"address":address,"semantic_type":semantic,"lat":lat,"lng":lng}),
+            })
+        })();
+        match parsed {
+            Some(item) => items.push(item),
+            None => skipped += 1,
+        }
+    }
+    Ok((items, skipped))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
