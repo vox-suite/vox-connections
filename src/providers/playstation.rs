@@ -38,9 +38,57 @@ pub struct PlayStationGame {
     pub image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_played_at: Option<DateTime<Utc>>,
+    pub last_played_at: DateTime<Utc>,
+    pub play_duration_seconds: u64,
+    pub play_count: u32,
+}
+
+/// Curated history can preserve records without a provider timestamp.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PlayStationGameHistory {
+    pub title_id: String,
+    pub name: String,
+    pub platform: String,
+    pub category: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_played_at: Option<DateTime<Utc>>,
     pub last_played_at: Option<DateTime<Utc>>,
     pub play_duration_seconds: u64,
     pub play_count: u32,
+}
+
+impl From<PlayStationGame> for PlayStationGameHistory {
+    fn from(game: PlayStationGame) -> Self {
+        Self {
+            title_id: game.title_id,
+            name: game.name,
+            platform: game.platform,
+            category: game.category,
+            image_url: game.image_url,
+            first_played_at: game.first_played_at,
+            last_played_at: Some(game.last_played_at),
+            play_duration_seconds: game.play_duration_seconds,
+            play_count: game.play_count,
+        }
+    }
+}
+impl TryFrom<PlayStationGameHistory> for PlayStationGame {
+    type Error = PlayStationError;
+    fn try_from(game: PlayStationGameHistory) -> Result<Self, Self::Error> {
+        Ok(Self {
+            title_id: game.title_id,
+            name: game.name,
+            platform: game.platform,
+            category: game.category,
+            image_url: game.image_url,
+            first_played_at: game.first_played_at,
+            last_played_at: game.last_played_at.ok_or(PlayStationError::Invalid)?,
+            play_duration_seconds: game.play_duration_seconds,
+            play_count: game.play_count,
+        })
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -154,7 +202,10 @@ impl PlayStationProviderClient for DefaultPlayStationProviderClient {
             .await
             .map_err(|e| PlayStationError::ProviderError(e.to_string()))?;
 
-        parse_titles_from_json(&body)
+        Ok(parse_history_titles_from_json(&body)?
+            .into_iter()
+            .filter_map(|game| game.try_into().ok())
+            .collect())
     }
 
     async fn fetch_user_titles(
@@ -193,7 +244,7 @@ impl MockPlayStationProviderClient {
                     "https://image.api.playstation.com/vulcan/ap/rnd/elden_ring.png".into(),
                 ),
                 first_played_at: Some(now - Duration::days(30)),
-                last_played_at: Some(now - Duration::hours(2)),
+                last_played_at: now - Duration::hours(2),
                 play_duration_seconds: 14400, // 4 hours
                 play_count: 18,
             },
@@ -206,7 +257,7 @@ impl MockPlayStationProviderClient {
                     "https://image.api.playstation.com/vulcan/ap/rnd/demons_souls.png".into(),
                 ),
                 first_played_at: Some(now - Duration::days(60)),
-                last_played_at: Some(now - Duration::days(1)),
+                last_played_at: now - Duration::days(1),
                 play_duration_seconds: 7200, // 2 hours
                 play_count: 8,
             },
@@ -219,7 +270,7 @@ impl MockPlayStationProviderClient {
                     "https://image.api.playstation.com/vulcan/ap/rnd/astros.png".into(),
                 ),
                 first_played_at: Some(now - Duration::days(90)),
-                last_played_at: Some(now - Duration::days(3)),
+                last_played_at: now - Duration::days(3),
                 play_duration_seconds: 5400,
                 play_count: 5,
             },
@@ -424,9 +475,19 @@ impl PlayStationService {
     }
 }
 
+/// Legacy dated-game response; undated records are available through the curated history parser.
 pub fn parse_titles_from_json(
-    body: &serde_json::Value,
+    payload: &serde_json::Value,
 ) -> Result<Vec<PlayStationGame>, PlayStationError> {
+    Ok(parse_history_titles_from_json(payload)?
+        .into_iter()
+        .filter_map(|game| game.try_into().ok())
+        .collect())
+}
+
+pub fn parse_history_titles_from_json(
+    body: &serde_json::Value,
+) -> Result<Vec<PlayStationGameHistory>, PlayStationError> {
     let titles_array = if let Some(titles) = body.get("titles").and_then(|t| t.as_array()) {
         titles
     } else if let Some(arr) = body.as_array() {
@@ -504,7 +565,7 @@ pub fn parse_titles_from_json(
 
         let play_count = item.get("playCount").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
 
-        result.push(PlayStationGame {
+        result.push(PlayStationGameHistory {
             title_id,
             name,
             platform,

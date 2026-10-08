@@ -943,20 +943,28 @@
         "declaration": "pub struct FindSchemas"
       },
       {
-        "line": 35,
+        "line": 36,
         "declaration": "pub fn new(db: Option<Db>, user_id: UserId) -> Self"
       },
       {
-        "line": 99,
+        "line": 43,
+        "declaration": "pub fn with_owner(mut self, owner: ResourceOwner) -> Self"
+      },
+      {
+        "line": 110,
         "declaration": "pub struct QueryUserDataArgs"
       },
       {
-        "line": 107,
+        "line": 118,
         "declaration": "pub struct QueryUserData"
       },
       {
-        "line": 113,
+        "line": 125,
         "declaration": "pub fn new(db: Option<Db>, user_id: UserId) -> Self"
+      },
+      {
+        "line": 132,
+        "declaration": "pub fn with_owner(mut self, owner: ResourceOwner) -> Self"
       },
       {
         "line": 25,
@@ -964,22 +972,22 @@
         "kind": "public_field"
       },
       {
-        "line": 100,
+        "line": 111,
         "declaration": "pub schema_ids: Vec<Uuid>,",
         "kind": "public_field"
       },
       {
-        "line": 101,
+        "line": 112,
         "declaration": "pub metric_field: String,",
         "kind": "public_field"
       },
       {
-        "line": 102,
+        "line": 113,
         "declaration": "pub aggregation: String,",
         "kind": "public_field"
       },
       {
-        "line": 103,
+        "line": 114,
         "declaration": "pub group_by: String,",
         "kind": "public_field"
       }
@@ -1413,63 +1421,63 @@
         "declaration": "pub fn with_owner(mut self, owner: ResourceOwner) -> Self"
       },
       {
-        "line": 82,
+        "line": 78,
         "declaration": "pub struct ProposeGoalArgs"
       },
       {
-        "line": 101,
+        "line": 97,
         "declaration": "pub struct ProposeGoal"
       },
       {
-        "line": 109,
+        "line": 105,
         "declaration": "pub fn new( db: Option<Db>, user_id: UserId, space_id: Uuid, user_events: Option<UserEventHub>, ) -> Self"
       },
       {
-        "line": 123,
+        "line": 119,
         "declaration": "pub fn with_owner(mut self, owner: ResourceOwner) -> Self"
       },
       {
-        "line": 83,
+        "line": 79,
         "declaration": "pub node_id: Uuid,",
         "kind": "public_field"
       },
       {
-        "line": 84,
+        "line": 80,
         "declaration": "pub title: String,",
         "kind": "public_field"
       },
       {
-        "line": 85,
+        "line": 81,
         "declaration": "pub kind: String,",
         "kind": "public_field"
       },
       {
-        "line": 87,
+        "line": 83,
         "declaration": "pub direction: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 89,
+        "line": 85,
         "declaration": "pub period: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 90,
+        "line": 86,
         "declaration": "pub target: f64,",
         "kind": "public_field"
       },
       {
-        "line": 92,
+        "line": 88,
         "declaration": "pub unit: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 94,
+        "line": 90,
         "declaration": "pub measurement_id: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 96,
+        "line": 92,
         "declaration": "pub deadline: Option<String>,",
         "kind": "public_field"
       }
@@ -2294,35 +2302,35 @@
         "declaration": "pub fn with_suggester(mut self, suggester: Arc<dyn SuggestingCharts>) -> Self"
       },
       {
-        "line": 209,
+        "line": 208,
         "declaration": "pub async fn measurements( &self, actor: &Actor, timezone: &str, ) -> Result<Vec<Measurement>, PulseError>"
       },
       {
-        "line": 225,
+        "line": 224,
         "declaration": "pub async fn discover( &self, actor: &Actor, input: DiscoveryInput, ) -> Result<DiscoveryResponse, PulseError>"
       },
       {
-        "line": 418,
+        "line": 417,
         "declaration": "pub async fn compose( &self, actor: &Actor, mut input: ComposeInput, ) -> Result<ComposeResponse, PulseError>"
       },
       {
-        "line": 513,
+        "line": 512,
         "declaration": "pub async fn preview( &self, actor: &Actor, definition: PulseDefinition, ) -> Result<PulseResult, PulseError>"
       },
       {
-        "line": 534,
+        "line": 533,
         "declaration": "pub async fn save( &self, actor: &Actor, input: SavePulseInput, ) -> Result<SavedPulseChart, PulseError>"
       },
       {
-        "line": 561,
+        "line": 560,
         "declaration": "pub async fn delete_chart(&self, actor: &Actor, id: uuid::Uuid) -> Result<bool, PulseError>"
       },
       {
-        "line": 564,
+        "line": 563,
         "declaration": "pub async fn dismiss( &self, actor: &Actor, definition: PulseDefinition, ) -> Result<(), PulseError>"
       },
       {
-        "line": 578,
+        "line": 577,
         "declaration": "pub async fn canvas( &self, actor: &Actor, timezone: &str, refresh: bool, cursor: Option<Uuid>, ) -> Result<CanvasResponse, PulseError>"
       },
       {
@@ -7086,15 +7094,15 @@
         "declaration": "pub use vox_connections::accounts::*;"
       },
       {
-        "line": 755,
+        "line": 775,
         "declaration": "pub struct FreshConnectionsService(vox_connections::accounts::FreshConnectionsService, PgPool)"
       },
       {
-        "line": 763,
+        "line": 783,
         "declaration": "pub async fn native_scope( &self, user: Uuid, ) -> Result<vox_connections::identity::RequestContext, FreshConnectionError>"
       },
       {
-        "line": 781,
+        "line": 801,
         "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, hub: Option<crate::realtime::UserEventHub>, client: Option<String>, secret: Option<String>, core_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
       }
     ],
@@ -11000,7 +11008,7 @@
         "declaration": "pub async fn sync(&self, id: Uuid) -> Result<SyncResult, PlayStationError>"
       },
       {
-        "line": 257,
+        "line": 255,
         "declaration": "pub async fn run_due(&self) -> Result<(), PlayStationError>"
       },
       {
@@ -13389,7 +13397,7 @@
         "declaration": "pub async fn list_for_user( &self, user_id: Option<Uuid>, ) -> Result<Vec<DataSchema>, sqlx::Error>"
       },
       {
-        "line": 110,
+        "line": 122,
         "declaration": "pub async fn get_by_ids( &self, user_id: Option<Uuid>, ids: &[Uuid], ) -> Result<Vec<DataSchema>, sqlx::Error>"
       }
     ],
@@ -13499,6 +13507,7 @@
         "declaration": "pub async fn get_graph( &self, user_id: Uuid, space_id: Uuid, ) -> Result<Option<SpaceGraph>, sqlx::Error>"
       }
     ],
+    "src/storage/span_authority.rs": [],
     "src/storage/spans.rs": [
       {
         "line": 25,
@@ -13959,107 +13968,107 @@
         "declaration": "pub trait TimelineIngestor: Send + Sync"
       },
       {
-        "line": 148,
+        "line": 158,
         "declaration": "pub struct FreshConnectionsService"
       },
       {
-        "line": 164,
+        "line": 174,
         "declaration": "pub async fn read_personal_account( &self, scope: &impl crate::identity::RequestScope, id: Uuid, ) -> Result<Value, FreshConnectionError>"
       },
       {
-        "line": 173,
+        "line": 183,
         "declaration": "pub async fn reassociate( &self, scope: &impl crate::identity::RequestScope, id: Uuid, ) -> Result<(), FreshConnectionError>"
       },
       {
-        "line": 188,
+        "line": 208,
         "declaration": "pub async fn sync_zomato( &self, scope: &impl crate::identity::RequestScope, id: Uuid, ) -> Result<usize, FreshConnectionError>"
       },
       {
-        "line": 197,
+        "line": 217,
         "declaration": "pub async fn sync_swiggy( &self, scope: &impl crate::identity::RequestScope, id: Uuid, ) -> Result<usize, FreshConnectionError>"
       },
       {
-        "line": 256,
+        "line": 276,
         "declaration": "pub async fn list_connections( &self, scope: &impl crate::identity::RequestScope, ) -> Result<Vec<ConnectionItem>, FreshConnectionError>"
       },
       {
-        "line": 264,
+        "line": 284,
         "declaration": "pub async fn start( &self, scope: &impl crate::identity::RequestScope, req: StartConnectionRequest, ) -> Result<StartConnectionResponse, FreshConnectionError>"
       },
       {
-        "line": 273,
+        "line": 293,
         "declaration": "pub async fn get_setup_status( &self, scope: &impl crate::identity::RequestScope, setup_id: Uuid, ) -> Result<SetupStatusResponse, FreshConnectionError>"
       },
       {
-        "line": 282,
+        "line": 302,
         "declaration": "pub async fn update_preferences( &self, scope: &impl crate::identity::RequestScope, connection_id: Uuid, req: PreferencesRequest, ) -> Result<ConnectionItem, FreshConnectionError>"
       },
       {
-        "line": 293,
+        "line": 313,
         "declaration": "pub async fn refresh( &self, scope: &impl crate::identity::RequestScope, connection_id: Uuid, ) -> Result<RefreshResponse, FreshConnectionError>"
       },
       {
-        "line": 302,
+        "line": 322,
         "declaration": "pub async fn disconnect( &self, scope: &impl crate::identity::RequestScope, connection_id: Uuid, ) -> Result<(), FreshConnectionError>"
       },
       {
-        "line": 321,
+        "line": 341,
         "declaration": "pub async fn sync_google_calendar( &self, scope: &impl crate::identity::RequestScope, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
       },
       {
-        "line": 331,
+        "line": 351,
         "declaration": "pub async fn sync_playstation( &self, scope: &impl crate::identity::RequestScope, connection_id: Uuid, ) -> Result<usize, FreshConnectionError>"
       },
       {
-        "line": 341,
+        "line": 361,
         "declaration": "pub async fn cancel_setup( &self, scope: &impl crate::identity::RequestScope, setup_id: Uuid, ) -> Result<(), FreshConnectionError>"
       },
       {
-        "line": 350,
+        "line": 370,
         "declaration": "pub async fn assistant_read( &self, scope: &impl crate::identity::RequestScope, agent: &str, connector: &str, limit: usize, ) -> Result<Value, FreshConnectionError>"
       },
       {
-        "line": 379,
+        "line": 399,
         "declaration": "pub async fn sync_personal( &self, scope: &impl crate::identity::RequestScope, id: Uuid, connector: &str, ) -> Result<usize, FreshConnectionError>"
       },
       {
-        "line": 389,
+        "line": 409,
         "declaration": "pub async fn read_personal( &self, scope: &impl crate::identity::RequestScope, agent: &str, id: Uuid, ) -> Result<Value, FreshConnectionError>"
       },
       {
-        "line": 413,
+        "line": 433,
         "declaration": "pub async fn import_maps_timeline( &self, scope: &impl crate::identity::RequestScope, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
       },
       {
-        "line": 424,
+        "line": 444,
         "declaration": "pub async fn import_youtube_history( &self, scope: &impl crate::identity::RequestScope, history: Value, consent: bool, ) -> Result<Value, FreshConnectionError>"
       },
       {
-        "line": 435,
+        "line": 455,
         "declaration": "pub fn new( pool: PgPool, credential_key: Option<&str>, ingestor: std::sync::Arc<dyn TimelineIngestor>, google_client_id: Option<String>, google_client_secret: Option<String>, core_api_url: Option<String>, ) -> Result<Self, FreshConnectionError>"
       },
       {
-        "line": 478,
+        "line": 498,
         "declaration": "pub fn list_connectors(&self) -> Vec<ConnectorDescriptor>"
       },
       {
-        "line": 849,
+        "line": 869,
         "declaration": "pub async fn handle_google_callback( &self, code: &str, state: &str, ) -> Result<Uuid, FreshConnectionError>"
       },
       {
-        "line": 1292,
+        "line": 1312,
         "declaration": "pub async fn handle_food_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
       },
       {
-        "line": 1578,
+        "line": 1607,
         "declaration": "pub async fn fail_google_setup(&self, state: &str) -> Result<(), FreshConnectionError>"
       },
       {
-        "line": 1802,
+        "line": 1831,
         "declaration": "pub async fn handle_personal_callback( &self, connector: &str, code: Option<&str>, state: &str, ) -> Result<Uuid, FreshConnectionError>"
       },
       {
-        "line": 2127,
+        "line": 2171,
         "declaration": "pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError>"
       },
       {
@@ -14209,7 +14218,7 @@
       },
       {
         "line": 93,
-        "declaration": "pub trait TimelineIngestor: Send + Sync {\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn game_history(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _games: &[PlayStationGame],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
+        "declaration": "pub trait TimelineIngestor: Send + Sync {\n    /// Move only history provably bound to this account, in the ownership transaction.\n    async fn reassociate_history(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _context_id: Uuid,\n    ) -> Result<(), FreshConnectionError> {\n        Ok(())\n    }\n    async fn calendar(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        account_id: &str,\n        events: &[GoogleCalendarEvent],\n        time_min: DateTime<Utc>,\n        time_max: DateTime<Utc>,\n    ) -> Result<usize, FreshConnectionError>;\n    async fn gaming(\n        &self,\n        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        user_id: Uuid,\n        connection_id: Uuid,\n        activities: &[crate::providers::observations::ObservedActivity],\n    ) -> Result<usize, FreshConnectionError>;\n    async fn game_history(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _games: &[PlayStationGameHistory],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn food_order(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    async fn personal_activity(\n        &self,\n        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,\n        _user_id: Uuid,\n        _connection_id: Uuid,\n        _connector: &str,\n        _items: &[crate::providers::personal::PersonalActivity],\n    ) -> Result<usize, FreshConnectionError> {\n        Ok(0)\n    }\n    fn food_committed(\n        &self,\n        _user_id: Uuid,\n        _orders: &[crate::providers::food_delivery::FoodDeliveryOrder],\n    ) {\n    }\n}",
         "kind": "public_trait_contract"
       }
     ],
@@ -16444,11 +16453,11 @@
       },
       {
         "line": 25,
-        "declaration": "pub fn observed_activity( account_id: &str, previous: &BTreeMap<String, GameSnapshot>, games: &[PlayStationGame], baseline_at: Option<DateTime<Utc>>, now: DateTime<Utc>, ) -> Vec<ObservedActivity>"
+        "declaration": "pub fn observed_activity( account_id: &str, previous: &BTreeMap<String, GameSnapshot>, games: &[PlayStationGameHistory], baseline_at: Option<DateTime<Utc>>, now: DateTime<Utc>, ) -> Vec<ObservedActivity>"
       },
       {
         "line": 73,
-        "declaration": "pub fn checkpoint( previous: &BTreeMap<String, GameSnapshot>, games: &[PlayStationGame], now: DateTime<Utc>, ) -> BTreeMap<String, GameSnapshot>"
+        "declaration": "pub fn checkpoint( previous: &BTreeMap<String, GameSnapshot>, games: &[PlayStationGameHistory], now: DateTime<Utc>, ) -> BTreeMap<String, GameSnapshot>"
       },
       {
         "line": 7,
@@ -16477,7 +16486,7 @@
       },
       {
         "line": 18,
-        "declaration": "pub game: PlayStationGame,",
+        "declaration": "pub game: PlayStationGameHistory,",
         "kind": "public_field"
       },
       {
@@ -16657,60 +16666,68 @@
         "declaration": "pub struct PlayStationGame"
       },
       {
-        "line": 47,
+        "line": 48,
+        "declaration": "pub struct PlayStationGameHistory"
+      },
+      {
+        "line": 95,
         "declaration": "pub enum PlayStationError"
       },
       {
-        "line": 71,
+        "line": 119,
         "declaration": "pub struct PlayStationRecentActivityResponse"
       },
       {
-        "line": 78,
+        "line": 126,
         "declaration": "pub trait PlayStationProviderClient: Send + Sync"
       },
       {
-        "line": 92,
+        "line": 140,
         "declaration": "pub struct DefaultPlayStationProviderClient"
       },
       {
-        "line": 98,
+        "line": 146,
         "declaration": "pub fn new(base_url: impl Into<String>) -> Self"
       },
       {
-        "line": 169,
+        "line": 220,
         "declaration": "pub struct MockPlayStationProviderClient"
       },
       {
-        "line": 176,
+        "line": 227,
         "declaration": "pub fn new(games: Vec<PlayStationGame>) -> Self"
       },
       {
-        "line": 184,
+        "line": 235,
         "declaration": "pub fn with_default_ps5_games() -> Self"
       },
       {
-        "line": 267,
+        "line": 318,
         "declaration": "pub struct PlayStationService"
       },
       {
-        "line": 276,
+        "line": 327,
         "declaration": "pub fn new( _db: sqlx::PgPool, connections: ConnectionService, grants: CapabilityGrantService, client: Arc<dyn PlayStationProviderClient>, ) -> Self"
       },
       {
-        "line": 291,
+        "line": 342,
         "declaration": "pub fn with_accounts( mut self, accounts: super::playstation_account::PlayStationAccounts, ) -> Self"
       },
       {
-        "line": 300,
+        "line": 351,
         "declaration": "pub fn integration_declaration(deployment_external_key: &str) -> RegisterIntegrationRequest"
       },
       {
-        "line": 354,
+        "line": 405,
         "declaration": "pub async fn read_recent_activity( &self, context: &RequestContext, agent_external_key: &str, connection_id: Uuid, limit: usize, ) -> Result<PlayStationRecentActivityResponse, PlayStationError>"
       },
       {
-        "line": 427,
-        "declaration": "pub fn parse_titles_from_json( body: &serde_json::Value, ) -> Result<Vec<PlayStationGame>, PlayStationError>"
+        "line": 479,
+        "declaration": "pub fn parse_titles_from_json( payload: &serde_json::Value, ) -> Result<Vec<PlayStationGame>, PlayStationError>"
+      },
+      {
+        "line": 488,
+        "declaration": "pub fn parse_history_titles_from_json( body: &serde_json::Value, ) -> Result<Vec<PlayStationGameHistory>, PlayStationError>"
       },
       {
         "line": 33,
@@ -16744,7 +16761,7 @@
       },
       {
         "line": 41,
-        "declaration": "pub last_played_at: Option<DateTime<Utc>>,",
+        "declaration": "pub last_played_at: DateTime<Utc>,",
         "kind": "public_field"
       },
       {
@@ -16758,37 +16775,82 @@
         "kind": "public_field"
       },
       {
-        "line": 72,
+        "line": 49,
+        "declaration": "pub title_id: String,",
+        "kind": "public_field"
+      },
+      {
+        "line": 50,
+        "declaration": "pub name: String,",
+        "kind": "public_field"
+      },
+      {
+        "line": 51,
+        "declaration": "pub platform: String,",
+        "kind": "public_field"
+      },
+      {
+        "line": 52,
+        "declaration": "pub category: String,",
+        "kind": "public_field"
+      },
+      {
+        "line": 54,
+        "declaration": "pub image_url: Option<String>,",
+        "kind": "public_field"
+      },
+      {
+        "line": 56,
+        "declaration": "pub first_played_at: Option<DateTime<Utc>>,",
+        "kind": "public_field"
+      },
+      {
+        "line": 57,
+        "declaration": "pub last_played_at: Option<DateTime<Utc>>,",
+        "kind": "public_field"
+      },
+      {
+        "line": 58,
+        "declaration": "pub play_duration_seconds: u64,",
+        "kind": "public_field"
+      },
+      {
+        "line": 59,
+        "declaration": "pub play_count: u32,",
+        "kind": "public_field"
+      },
+      {
+        "line": 120,
         "declaration": "pub games: Vec<PlayStationGame>,",
         "kind": "public_field"
       },
       {
-        "line": 73,
+        "line": 121,
         "declaration": "pub count: usize,",
         "kind": "public_field"
       },
       {
-        "line": 74,
+        "line": 122,
         "declaration": "pub freshness_seconds: u32,",
         "kind": "public_field"
       },
       {
-        "line": 170,
+        "line": 221,
         "declaration": "pub games: std::sync::Mutex<Vec<PlayStationGame>>,",
         "kind": "public_field"
       },
       {
-        "line": 171,
+        "line": 222,
         "declaration": "pub fail_with_rate_limit: std::sync::atomic::AtomicBool,",
         "kind": "public_field"
       },
       {
-        "line": 172,
+        "line": 223,
         "declaration": "pub fail_with_unauthorized: std::sync::atomic::AtomicBool,",
         "kind": "public_field"
       },
       {
-        "line": 78,
+        "line": 126,
         "declaration": "pub trait PlayStationProviderClient: Send + Sync {\n    async fn fetch_recently_played(\n        &self,\n        access_token: &str,\n        limit: usize,\n    ) -> Result<Vec<PlayStationGame>, PlayStationError>;\n\n    async fn fetch_user_titles(\n        &self,\n        access_token: &str,\n        limit: usize,\n    ) -> Result<Vec<PlayStationGame>, PlayStationError>;\n}",
         "kind": "public_trait_contract"
       }
@@ -16926,81 +16988,81 @@
     ],
     "src/providers/psn.rs": [
       {
-        "line": 12,
+        "line": 14,
         "declaration": "pub struct Tokens"
       },
       {
-        "line": 21,
+        "line": 23,
         "declaration": "pub struct VerifiedAccount"
       },
       {
-        "line": 28,
+        "line": 30,
         "declaration": "pub struct Client"
       },
       {
-        "line": 34,
+        "line": 36,
         "declaration": "pub fn new() -> Result<Self, PlayStationError>"
       },
       {
-        "line": 101,
+        "line": 103,
         "declaration": "pub async fn link(&self, npsso: &str) -> Result<VerifiedAccount, PlayStationError>"
       },
       {
-        "line": 187,
+        "line": 189,
         "declaration": "pub async fn refresh(&self, refresh: &str) -> Result<Tokens, PlayStationError>"
       },
       {
-        "line": 196,
-        "declaration": "pub async fn games(&self, token: &str) -> Result<Vec<PlayStationGame>, PlayStationError>"
+        "line": 198,
+        "declaration": "pub async fn games( &self, token: &str, ) -> Result<Vec<PlayStationGameHistory>, PlayStationError>"
       },
       {
-        "line": 13,
+        "line": 15,
         "declaration": "pub access_token: String,",
         "kind": "public_field"
       },
       {
-        "line": 14,
+        "line": 16,
         "declaration": "pub refresh_token: String,",
         "kind": "public_field"
       },
       {
-        "line": 15,
+        "line": 17,
         "declaration": "pub expires_in: i64,",
         "kind": "public_field"
       },
       {
-        "line": 16,
+        "line": 18,
         "declaration": "pub refresh_token_expires_in: i64,",
         "kind": "public_field"
       },
       {
-        "line": 17,
+        "line": 19,
         "declaration": "pub id_token: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 18,
+        "line": 20,
         "declaration": "pub scope: String,",
         "kind": "public_field"
       },
       {
-        "line": 22,
+        "line": 24,
         "declaration": "pub account_id: String,",
         "kind": "public_field"
       },
       {
-        "line": 23,
+        "line": 25,
         "declaration": "pub online_id: String,",
         "kind": "public_field"
       },
       {
-        "line": 24,
+        "line": 26,
         "declaration": "pub tokens: Tokens,",
         "kind": "public_field"
       },
       {
-        "line": 25,
-        "declaration": "pub games: Vec<PlayStationGame>,",
+        "line": 27,
+        "declaration": "pub games: Vec<PlayStationGameHistory>,",
         "kind": "public_field"
       }
     ],

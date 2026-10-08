@@ -752,3 +752,7 @@ Host compatibility blocker: https://github.com/vox-suite/vox-web/issues/27. Nati
 ## Current restored declarations
 
 The JSON also records the current declarations for every library Rust source, including restored modules and compatibility signatures. Provider source declarations are distinct from deployment-verified access.
+
+## Additional confidence audit
+
+The legacy PlayStation game timestamp, provider/account game responses and parser retain the baseline required timestamp contract. Curated optional history uses `PlayStationGameHistory` and `parse_history_titles_from_json`; missing timestamps are not fabricated. Account preferences survive relink/import, and paused operations do not ingest history. The additive `TimelineIngestor::reassociate_history` hook lets each host move its own account-bound history atomically with explicit reassociation; hosts with historical storage must implement it. Core's implementation preserves span/event identity and annotations without creating agent grants.

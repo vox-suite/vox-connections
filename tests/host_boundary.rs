@@ -69,3 +69,34 @@ fn bundled_conformance_suite_passes_reference_platform() {
     assert!(report.is_conformant(), "{:#?}", report.failures);
     assert!(report.steps > 0);
 }
+
+#[test]
+fn legacy_playstation_timestamp_contract_and_optional_curated_history_coexist() {
+    use vox_connections::providers::playstation::{PlayStationGame, PlayStationGameHistory};
+    let timestamp = chrono::Utc::now();
+    let game = PlayStationGame {
+        title_id: "id".into(),
+        name: "Game".into(),
+        platform: "PS5".into(),
+        category: "gaming".into(),
+        image_url: None,
+        first_played_at: None,
+        last_played_at: timestamp,
+        play_duration_seconds: 1,
+        play_count: 1,
+    };
+    assert_eq!(game.last_played_at.timestamp(), timestamp.timestamp());
+    let mut history: PlayStationGameHistory = game.into();
+    history.last_played_at = None;
+    assert!(PlayStationGame::try_from(history).is_err());
+}
+
+#[test]
+fn legacy_playstation_parser_returns_the_original_public_game_type() {
+    let games: Vec<vox_connections::providers::playstation::PlayStationGame> =
+        vox_connections::providers::playstation::parse_titles_from_json(
+            &serde_json::json!({"titles":[]}),
+        )
+        .unwrap();
+    assert!(games.is_empty());
+}

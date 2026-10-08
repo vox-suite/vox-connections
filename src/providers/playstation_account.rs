@@ -94,7 +94,7 @@ pub fn observed_activity(
                 new_game = GameSnapshot {
                     total_seconds: 0,
                     observed_at: baseline,
-                    last_played_at: game.last_played_at?,
+                    last_played_at: game.last_played_at,
                     name: game.name.clone(),
                     platform: game.platform.clone(),
                 };

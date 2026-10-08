@@ -43,3 +43,7 @@ Retain immediate PSN first sync and sync-failure logging, consented Maps import,
 Core's native list/detail/day/chart reads isolate the exact first-party context and honor disabled account preferences. Restored generic connection history remains readable to its owner. Agent timeline/chart/goal reads additionally check selected-agent grants, including a fresh check after model generation. Combined spending is retained for owner charts and withheld from agents until its execution can bind contributor grants. Expedia's legacy cancellation interface fails closed until it can carry an exact penalty-bound approval.
 
 Local PostgreSQL18/pgvector fixture: six charts, 1,000 rows: cold5 queries/30.36ms, warm1 query/p95 1.16ms; 100,000 rows: cold5 queries/2275.82ms, warm1 query/p95 0.82ms, forced refresh5 queries/2140.63ms. Account catalogue authorization batches scopes once and effective grants once per context per pass. These are disposable local fixture measurements, not production latency guarantees.
+
+## Confidence audit
+
+Relink and repeat import preserve existing read/sync preferences; paused operations skip host ingestion. Explicit reassociation invokes `TimelineIngestor::reassociate_history` inside the ownership transaction. Independent hosts retaining account history should implement that default no-op hook; errors roll back ownership. Core handles its account-bound span/event envelopes and deduplication IDs. Legacy required-timestamp PlayStation contracts and parser remain available alongside the optional curated history type/parser.
