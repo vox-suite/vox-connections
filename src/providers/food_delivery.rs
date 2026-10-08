@@ -239,10 +239,10 @@ impl<'a> Session<'a> {
     }
 }
 pub(crate) fn decode_rpc(text: &str, id: &Value) -> Result<Option<Value>, FoodDeliveryError> {
-    if let Ok(value) = serde_json::from_str::<Value>(text) {
-        if &value["id"] == id {
-            return Ok(Some(value));
-        }
+    if let Ok(value) = serde_json::from_str::<Value>(text)
+        && &value["id"] == id
+    {
+        return Ok(Some(value));
     }
     let normalized = text.replace("\r\n", "\n");
     for event in normalized
@@ -254,10 +254,10 @@ pub(crate) fn decode_rpc(text: &str, id: &Value) -> Result<Option<Value>, FoodDe
             .filter_map(|l| l.strip_prefix("data:").map(str::trim_start))
             .collect::<Vec<_>>()
             .join("\n");
-        if let Ok(value) = serde_json::from_str::<Value>(&data) {
-            if &value["id"] == id {
-                return Ok(Some(value));
-            }
+        if let Ok(value) = serde_json::from_str::<Value>(&data)
+            && &value["id"] == id
+        {
+            return Ok(Some(value));
         }
     }
     Ok(None)

@@ -1,4 +1,4 @@
-use super::playstation::PlayStationGame;
+use super::playstation::PlayStationGameHistory;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -15,7 +15,7 @@ pub struct GameSnapshot {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ObservedActivity {
-    pub game: PlayStationGame,
+    pub game: PlayStationGameHistory,
     pub duration_seconds: u64,
     pub observation_start: DateTime<Utc>,
     pub observation_end: DateTime<Utc>,
@@ -25,7 +25,7 @@ pub struct ObservedActivity {
 pub fn observed_activity(
     account_id: &str,
     previous: &BTreeMap<String, GameSnapshot>,
-    games: &[PlayStationGame],
+    games: &[PlayStationGameHistory],
     baseline_at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> Vec<ObservedActivity> {
@@ -72,7 +72,7 @@ pub fn observed_activity(
 
 pub fn checkpoint(
     previous: &BTreeMap<String, GameSnapshot>,
-    games: &[PlayStationGame],
+    games: &[PlayStationGameHistory],
     now: DateTime<Utc>,
 ) -> BTreeMap<String, GameSnapshot> {
     let mut snapshots = previous.clone();
@@ -100,8 +100,8 @@ pub fn checkpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn game(total: u64) -> PlayStationGame {
-        PlayStationGame {
+    fn game(total: u64) -> PlayStationGameHistory {
+        PlayStationGameHistory {
             title_id: "game".into(),
             name: "Game".into(),
             platform: "PS5".into(),

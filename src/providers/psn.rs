@@ -1,4 +1,6 @@
-use super::playstation::{PlayStationError, PlayStationGame, parse_titles_from_json};
+use super::playstation::{
+    PlayStationError, PlayStationGameHistory, parse_history_titles_from_json,
+};
 use serde::Deserialize;
 use serde_json::Value;
 const AUTH: &str = "https://ca.account.sony.com/api/authz/v3/oauth";
@@ -22,7 +24,7 @@ pub struct VerifiedAccount {
     pub account_id: String,
     pub online_id: String,
     pub tokens: Tokens,
-    pub games: Vec<PlayStationGame>,
+    pub games: Vec<PlayStationGameHistory>,
 }
 #[derive(Clone)]
 pub struct Client {
@@ -193,7 +195,10 @@ impl Client {
         ])
         .await
     }
-    pub async fn games(&self, token: &str) -> Result<Vec<PlayStationGame>, PlayStationError> {
+    pub async fn games(
+        &self,
+        token: &str,
+    ) -> Result<Vec<PlayStationGameHistory>, PlayStationError> {
         let mut games = Vec::new();
         let mut offset = 0u64;
         for _ in 0..20 {
@@ -217,7 +222,7 @@ impl Client {
                 .json()
                 .await
                 .map_err(|_| PlayStationError::Invalid)?;
-            games.extend(parse_titles_from_json(&body)?);
+            games.extend(parse_history_titles_from_json(&body)?);
             match body.get("nextOffset").and_then(Value::as_u64) {
                 Some(next) if next > offset => offset = next,
                 None => return Ok(games),
