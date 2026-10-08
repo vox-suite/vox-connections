@@ -1405,63 +1405,71 @@
         "declaration": "pub struct ListGoalMeasurements"
       },
       {
-        "line": 27,
+        "line": 28,
         "declaration": "pub fn new(db: Option<Db>, user_id: UserId) -> Self"
       },
       {
-        "line": 71,
+        "line": 35,
+        "declaration": "pub fn with_owner(mut self, owner: ResourceOwner) -> Self"
+      },
+      {
+        "line": 82,
         "declaration": "pub struct ProposeGoalArgs"
       },
       {
-        "line": 90,
+        "line": 101,
         "declaration": "pub struct ProposeGoal"
       },
       {
-        "line": 97,
+        "line": 109,
         "declaration": "pub fn new( db: Option<Db>, user_id: UserId, space_id: Uuid, user_events: Option<UserEventHub>, ) -> Self"
       },
       {
-        "line": 72,
+        "line": 123,
+        "declaration": "pub fn with_owner(mut self, owner: ResourceOwner) -> Self"
+      },
+      {
+        "line": 83,
         "declaration": "pub node_id: Uuid,",
         "kind": "public_field"
       },
       {
-        "line": 73,
+        "line": 84,
         "declaration": "pub title: String,",
         "kind": "public_field"
       },
       {
-        "line": 74,
+        "line": 85,
         "declaration": "pub kind: String,",
         "kind": "public_field"
       },
       {
-        "line": 76,
+        "line": 87,
         "declaration": "pub direction: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 78,
+        "line": 89,
         "declaration": "pub period: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 79,
+        "line": 90,
         "declaration": "pub target: f64,",
         "kind": "public_field"
       },
       {
-        "line": 81,
+        "line": 92,
         "declaration": "pub unit: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 83,
+        "line": 94,
         "declaration": "pub measurement_id: Option<String>,",
         "kind": "public_field"
       },
       {
-        "line": 85,
+        "line": 96,
         "declaration": "pub deadline: Option<String>,",
         "kind": "public_field"
       }
@@ -1695,8 +1703,12 @@
         "declaration": "pub struct UpdateSpan"
       },
       {
-        "line": 394,
+        "line": 395,
         "declaration": "pub fn new(db: Option<Db>, owner: ResourceOwner, user_events: UserEventHub) -> Self"
+      },
+      {
+        "line": 403,
+        "declaration": "pub fn with_agent(mut self, agent: &str) -> Self"
       },
       {
         "line": 76,
@@ -13517,27 +13529,39 @@
         "declaration": "pub async fn get_by_id(&self, user_id: Uuid, id: Uuid) -> Result<Option<Span>, sqlx::Error>"
       },
       {
-        "line": 130,
+        "line": 121,
+        "declaration": "pub async fn get_for_owner( &self, owner: crate::identity::ResourceOwner, id: Uuid, ) -> Result<Option<Span>, sqlx::Error>"
+      },
+      {
+        "line": 147,
         "declaration": "pub async fn list(&self, user_id: Uuid, query: &SpanQuery) -> Result<Vec<Span>, sqlx::Error>"
       },
       {
-        "line": 157,
+        "line": 150,
+        "declaration": "pub async fn list_for_owner( &self, owner: crate::identity::ResourceOwner, query: &SpanQuery, ) -> Result<Vec<Span>, sqlx::Error>"
+      },
+      {
+        "line": 192,
         "declaration": "pub async fn revision(&self, user_id: Uuid) -> Result<i64, sqlx::Error>"
       },
       {
-        "line": 167,
+        "line": 202,
         "declaration": "pub async fn day_counts( &self, user_id: Uuid, collection_id: Option<Uuid>, bounds: &[(NaiveDate, DateTime<Utc>, DateTime<Utc>)], ) -> Result<Vec<SpanDaySummary>, sqlx::Error>"
       },
       {
-        "line": 220,
+        "line": 255,
         "declaration": "pub async fn day_page( &self, user_id: Uuid, collection_id: Option<Uuid>, start: DateTime<Utc>, end: DateTime<Utc>, after: Option<(DateTime<Utc>, Uuid)>, limit: i64, ) -> Result<Vec<Span>, sqlx::Error>"
       },
       {
-        "line": 256,
+        "line": 291,
         "declaration": "pub async fn update( &self, user_id: Uuid, id: Uuid, patch: SpanPatch, ) -> Result<ConcurrencyOutcome<Span>, sqlx::Error>"
       },
       {
-        "line": 349,
+        "line": 299,
+        "declaration": "pub async fn update_for_owner( &self, owner: crate::identity::ResourceOwner, id: Uuid, patch: SpanPatch, ) -> Result<ConcurrencyOutcome<Span>, sqlx::Error>"
+      },
+      {
+        "line": 403,
         "declaration": "pub async fn delete(&self, user_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>"
       }
     ],

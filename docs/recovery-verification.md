@@ -15,7 +15,7 @@ Verification used disposable PostgreSQL 18 with pgvector for Core, independent-h
 | Bounded metadata, schema drift and revocation | 1 passed |
 | Restored Amazon/Uber/Zomato services and Expedia transport | 2 passed: grant denial/revocation, minimized Uber fields, labelled incomplete handoffs, idempotent reconciliation and errors |
 | Core ingestion | 11 passed, including stable IDs on repeated sync, separate same-user context imports and observed PlayStation range markers |
-| Core migration upgrades | 5 passed through SQLx: old platform credentials/grants preserved, already-retired access stays revoked, ambiguous ownership preserved, current curated credentials/history IDs/notes preserved without duplication |
+| Core migration upgrades | 6 passed through SQLx: old platform credentials/grants preserved, already-retired access stays revoked, ambiguous ownership preserved, current curated credentials/history IDs/notes preserved without duplication |
 | Core ownership, memory, worker fences, approval/cancellation and specialist delegation | Pass with separate disposable fixture databases |
 
 ## Upgrade behavior
@@ -31,6 +31,10 @@ Already-deleted OAuth/package/credential rows cannot be reconstructed. Recovery 
 - Real provider linking, callback allowlisting, provider configuration and production-host verification remain deployment validation. Swiggy is default enabled when configured; Zomato OAuth stays opt-in.
 
 The latest synthetic evenly-spaced PlayStation sessions are intentionally superseded by the approved observed-range model. Retained first/last markers carry the labelled range; cumulative counter increases and estimated placement near a provider last-played timestamp are distinct. No sync deletes existing first/last history or asserts uninterrupted gaming.
+
+| Core scoped Pulse, goal and timeline reads | 16 passed: grant revocation during generation, owner-only composites, native/other-host separation, contextual creation, generic history and scoped goals |
+| Core day pagination and timezone boundaries | 1 passed |
+| Six-chart query budget and performance | Pass at 1,000 and 100,000 rows; cached loads use one query |
 
 ## Latest reconciliation and measured performance
 
