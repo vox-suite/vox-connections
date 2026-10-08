@@ -1,6 +1,6 @@
 # Recovery verification
 
-Audited Connections upstream through `6f43efb0ad984cd17c3b37ba4ddf73b850fb5e37` and Core through `658387e57b986947f50dbe71a58f9b3d5c07ea8a`. The [inventory](recovery-inventory.md) includes every changed file, public declarations, fields, trait contracts and re-exports. Regenerate it with `python3 tools/recovery_inventory.py --core /path/to/vox-core` with both repositories’ upstream histories available.
+Audited Connections upstream main `99458ac` plus Maps `f61edd9`, and Core main `ba13964`. The [inventory](recovery-inventory.md) includes every changed file, public declarations, fields, trait contracts and re-exports. Regenerate it with `python3 tools/recovery_inventory.py --core /path/to/vox-core` with both repositories’ upstream histories available.
 
 ## Evidence
 
@@ -10,12 +10,12 @@ Verification used disposable PostgreSQL 18 with pgvector for Core, independent-h
 | --- | --- |
 | Formatting and Clippy, all library targets | Pass, warnings denied |
 | Library, binaries, public host-boundary imports and HMAC service tests | Pass |
-| Curated account lifecycle suite | 20 passed: replay, rotation, disconnect/relink, leases, generations, paused preferences, explicit grants, two same-user contexts and standalone upgrade |
+| Curated account lifecycle suite | 22 passed: replay, rotation, disconnect/relink, leases, generations, paused preferences, explicit grants, two same-user contexts and standalone upgrade |
 | Independent-host package/grant/skill installation, consent and Google MCP reads | 3 passed |
 | Bounded metadata, schema drift and revocation | 1 passed |
 | Restored Amazon/Uber/Zomato services and Expedia transport | 2 passed: grant denial/revocation, minimized Uber fields, labelled incomplete handoffs, idempotent reconciliation and errors |
 | Core ingestion | 11 passed, including stable IDs on repeated sync, separate same-user context imports and observed PlayStation range markers |
-| Core migration upgrades | 3 passed through SQLx: old platform credentials/grants preserved, already-retired access stays revoked, ambiguous ownership preserved, current curated credentials/history IDs/notes preserved without duplication |
+| Core migration upgrades | 5 passed through SQLx: old platform credentials/grants preserved, already-retired access stays revoked, ambiguous ownership preserved, current curated credentials/history IDs/notes preserved without duplication |
 | Core ownership, memory, worker fences, approval/cancellation and specialist delegation | Pass with separate disposable fixture databases |
 
 ## Upgrade behavior
@@ -31,3 +31,11 @@ Already-deleted OAuth/package/credential rows cannot be reconstructed. Recovery 
 - Real provider linking, callback allowlisting, provider configuration and production-host verification remain deployment validation. Swiggy is default enabled when configured; Zomato OAuth stays opt-in.
 
 The latest synthetic evenly-spaced PlayStation sessions are intentionally superseded by the approved observed-range model. Retained first/last markers carry the labelled range; cumulative counter increases and estimated placement near a provider last-played timestamp are distinct. No sync deletes existing first/last history or asserts uninterrupted gaming.
+
+## Latest reconciliation and measured performance
+
+Retain immediate PSN first sync and sync-failure logging, consented Maps import, new Core finance records, goals and span day endpoints. HMAC verification uses the configured host key; a caller-supplied key cannot authorize requests. Proven explicit identity linking preserves contexts, connection IDs, grants and original credential encryption ownership through token rotation. Matching verified email alone does not merge authority.
+
+Core's native list/detail/day/chart reads isolate the exact first-party context and honor disabled account preferences. Restored generic connection history remains readable to its owner. Agent timeline/chart/goal reads additionally check selected-agent grants, including a fresh check after model generation. Combined spending is retained for owner charts and withheld from agents until its execution can bind contributor grants. Expedia's legacy cancellation interface fails closed until it can carry an exact penalty-bound approval.
+
+Local PostgreSQL18/pgvector fixture: six charts, 1,000 rows: cold5 queries/30.36ms, warm1 query/p95 1.16ms; 100,000 rows: cold5 queries/2275.82ms, warm1 query/p95 0.82ms, forced refresh5 queries/2140.63ms. Account catalogue authorization batches scopes once and effective grants once per context per pass. These are disposable local fixture measurements, not production latency guarantees.

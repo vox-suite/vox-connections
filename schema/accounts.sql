@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS vox_connections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     user_context_id UUID REFERENCES user_contexts(id),
+    credential_user_id UUID,
     connector_id TEXT NOT NULL,
     account_id TEXT,
     account_display_id TEXT,

@@ -167,16 +167,11 @@ impl HmacVerifier {
                 .to_str()
                 .map_err(|_| HmacAuthError::InvalidHeaderFormat(HEADER_HOST_NONCE))?;
 
-            // If a host secret was supplied in headers, verify against that or the configured secret
-            let secret_to_use: &[u8] = if let Some(sec) = headers.get(HEADER_HOST_SECRET) {
-                sec.as_bytes()
-            } else {
-                &self.secret
-            };
-
+            // Legacy header names use the established server-side trust key.
+            // A request can never choose its own authentication secret.
             return self
                 .verify_signature_with_secret(
-                    secret_to_use,
+                    &self.secret,
                     method,
                     path,
                     body,
@@ -398,5 +393,46 @@ mod tests {
             expired,
             Err(HmacAuthError::TimestampExpired { .. })
         ));
+    }
+    #[tokio::test]
+    async fn host_headers_cannot_choose_the_verification_key() {
+        let verifier = HmacVerifier::new(b"configured-trust-key", 300);
+        let now = 1700000000;
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_HOST_TIMESTAMP, now.to_string().parse().unwrap());
+        headers.insert(HEADER_HOST_NONCE, "attack".parse().unwrap());
+        headers.insert(HEADER_HOST_SECRET, "attacker-key".parse().unwrap());
+        let signature = HmacSigner::sign(
+            b"attacker-key",
+            "GET",
+            "/v1/connections",
+            b"",
+            now,
+            "attack",
+        )
+        .unwrap();
+        headers.insert(HEADER_HOST_SIGNATURE, signature.parse().unwrap());
+        assert!(matches!(
+            verifier
+                .verify("GET", "/v1/connections", b"", &headers, now)
+                .await,
+            Err(HmacAuthError::InvalidSignature)
+        ));
+        let signature = HmacSigner::sign(
+            b"configured-trust-key",
+            "GET",
+            "/v1/connections",
+            b"",
+            now,
+            "attack",
+        )
+        .unwrap();
+        headers.insert(HEADER_HOST_SIGNATURE, signature.parse().unwrap());
+        assert!(
+            verifier
+                .verify("GET", "/v1/connections", b"", &headers, now)
+                .await
+                .is_ok()
+        );
     }
 }

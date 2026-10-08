@@ -1560,7 +1560,7 @@ fn crypto_compatibility_adapter_preserves_ciphertext_and_associated_data() {
 async fn standalone_curated_upgrade_preserves_ids_credentials_and_does_not_grant_access() {
     let (svc, user, id) = fixture().await;
     // Model the curated-only schema, keeping its original constraint name.
-    sqlx::raw_sql("DROP FUNCTION project_curated_connection() CASCADE; DROP FUNCTION revoke_curated_credentials() CASCADE; ALTER TABLE vox_connections DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connection_setups DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connections ADD CONSTRAINT vox_connections_user_connector_unique UNIQUE(user_id,connector_id);")
+    sqlx::raw_sql("DROP FUNCTION project_curated_connection() CASCADE; DROP FUNCTION revoke_curated_credentials() CASCADE; ALTER TABLE vox_connections DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connections DROP COLUMN credential_user_id; ALTER TABLE vox_connection_setups DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connections ADD CONSTRAINT vox_connections_user_connector_unique UNIQUE(user_id,connector_id);")
         .execute(&svc.pool).await.unwrap();
     let cipher = svc
         .cipher()
@@ -1603,4 +1603,116 @@ async fn standalone_curated_upgrade_preserves_ids_credentials_and_does_not_grant
         .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn credential_provenance_survives_owner_change_and_rotation() {
+    let (svc, context, _) = fixture().await;
+    let original = svc
+        .credential_aad(context, "google_calendar")
+        .await
+        .unwrap();
+    sqlx::query("UPDATE vox_connections SET credential_user_id=user_id WHERE user_context_id=$1")
+        .bind(context)
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    let new_owner: Uuid = sqlx::query_scalar("INSERT INTO users DEFAULT VALUES RETURNING id")
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap();
+    // Mirror the production merger's deferred composite ownership checks.
+    sqlx::raw_sql("ALTER TABLE vox_connections ALTER CONSTRAINT vox_connections_context_owner DEFERRABLE; ALTER TABLE vox_connection_setups ALTER CONSTRAINT vox_setups_context_owner DEFERRABLE;").execute(&svc.pool).await.unwrap();
+    let mut tx = svc.pool.begin().await.unwrap();
+    sqlx::query("SET CONSTRAINTS ALL DEFERRED")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE user_contexts SET user_id=$2 WHERE id=$1")
+        .bind(context)
+        .bind(new_owner)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE vox_connections SET user_id=$2,credential_generation=gen_random_uuid() WHERE user_context_id=$1").bind(context).bind(new_owner).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(
+        svc.credential_aad(context, "google_calendar")
+            .await
+            .unwrap(),
+        original
+    );
+    let encrypted = svc
+        .cipher()
+        .unwrap()
+        .seal(original.as_bytes(), "rotated-token")
+        .unwrap();
+    assert_eq!(
+        svc.cipher()
+            .unwrap()
+            .open(
+                svc.credential_aad(context, "google_calendar")
+                    .await
+                    .unwrap()
+                    .as_bytes(),
+                &encrypted
+            )
+            .unwrap(),
+        "rotated-token"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn maps_import_is_scoped_consented_and_requires_agent_grants() {
+    use crate::identity::{DeploymentId, RequestContext, RequestSubject, UserContextId, UserId};
+    let (svc, user, _) = fixture().await;
+    let deployment: Uuid =
+        sqlx::query_scalar("SELECT deployment_id FROM user_contexts WHERE id=$1")
+            .bind(user)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    let other: Uuid = sqlx::query_scalar(
+        "INSERT INTO user_contexts(deployment_id,user_id) VALUES($1,$2) RETURNING id",
+    )
+    .bind(deployment)
+    .bind(user)
+    .fetch_one(&svc.pool)
+    .await
+    .unwrap();
+    let context = RequestContext {
+        id: UserContextId(user),
+        user_id: UserId(user),
+        subject: RequestSubject {
+            deployment_id: DeploymentId(deployment),
+        },
+    };
+    let other_context = RequestContext {
+        id: UserContextId(other),
+        ..context
+    };
+    let history = json!([{"startTime":"2026-01-01T08:00:00Z","endTime":"2026-01-01T09:00:00Z","visit":{"topCandidate":{"placeId":"place","semanticType":"HOME","placeLocation":{"latLng":"geo:12.9,77.6"}}}}]);
+    assert!(
+        svc.import_maps_timeline(&context, history.clone(), false)
+            .await
+            .is_err()
+    );
+    let first = svc
+        .import_maps_timeline(&context, history.clone(), true)
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(first["connection_id"].as_str().unwrap()).unwrap();
+    assert!(svc.read_personal_account(&other_context, id).await.is_err());
+    assert!(
+        svc.assistant_read(&context, "assistant", "maps_timeline", 25)
+            .await
+            .is_err()
+    );
+    let second = svc
+        .import_maps_timeline(&other_context, history, true)
+        .await
+        .unwrap();
+    assert_ne!(first["connection_id"], second["connection_id"]);
 }

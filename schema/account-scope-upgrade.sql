@@ -10,3 +10,6 @@ ALTER TABLE vox_connections DROP CONSTRAINT vox_connections_user_connector_uniqu
 ALTER TABLE vox_connections ADD CONSTRAINT vox_connections_context_connector_unique UNIQUE(user_context_id,connector_id);
 ALTER TABLE vox_connections ADD CONSTRAINT vox_connections_context_owner FOREIGN KEY(user_context_id,user_id) REFERENCES user_contexts(id,user_id);
 ALTER TABLE vox_connection_setups ADD CONSTRAINT vox_setups_context_owner FOREIGN KEY(user_context_id,user_id) REFERENCES user_contexts(id,user_id);
+
+-- Encryption identity is immutable provenance, not an ownership identifier.
+ALTER TABLE vox_connections ADD COLUMN credential_user_id UUID;

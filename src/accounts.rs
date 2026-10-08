@@ -231,7 +231,11 @@ impl FreshConnectionsService {
         context: Uuid,
         connector: &str,
     ) -> Result<String, FreshConnectionError> {
-        Ok(format!("{}:{connector}", self.owner(context).await?))
+        // Ciphertext stays bound to the identity that originally encrypted it, even
+        // after verified account unification transfers ownership of the context.
+        let owner: Uuid = sqlx::query_scalar("SELECT COALESCE((SELECT credential_user_id FROM vox_connections WHERE user_context_id=$1 AND connector_id=$2),u.user_id) FROM user_contexts u WHERE u.id=$1")
+            .bind(context).bind(connector).fetch_one(&self.pool).await?;
+        Ok(format!("{owner}:{connector}"))
     }
     async fn require_grant(
         &self,
@@ -2078,6 +2082,7 @@ impl FreshConnectionsService {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn import_takeout(
         &self,
         user_id: Uuid,

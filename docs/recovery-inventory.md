@@ -1,10 +1,10 @@
 # Recovery inventory
 
-Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `6f43efb0ad984cd17c3b37ba4ddf73b850fb5e37`.
+Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tips: Connections main `99458ac` plus Maps `f61edd9`; Core main `ba13964`.
 
-This inventory records the original five commits and four subsequently published Connections commits, plus every corresponding Core change. It records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.
+This inventory records the original five commits and seven subsequently published Connections commits, plus every corresponding Core change. It records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.
 
-The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these nine commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.
+The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these twelve commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.
 
 ## Per-commit file changes
 
@@ -172,6 +172,25 @@ The author’s apparent intent was a curated native account/timeline replacement
 | --- | --- | --- | --- |
 | `src/accounts.rs` | rewritten | 13 / 0 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
 
+### be81418 — Log the error when a scheduled connection sync fails
+
+| File | Classification | Added / deleted | Recovery disposition |
+| --- | --- | --- | --- |
+| `src/accounts.rs` | rewritten | 2 / 2 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
+
+### 99458ac — PlayStation: first sync right after connecting
+
+| File | Classification | Added / deleted | Recovery disposition |
+| --- | --- | --- | --- |
+| `src/accounts.rs` | rewritten | 2 / 2 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
+
+### f61edd9 — Add Google Maps Timeline import connector (maps_timeline)
+
+| File | Classification | Added / deleted | Recovery disposition |
+| --- | --- | --- | --- |
+| `src/accounts.rs` | rewritten | 43 / 8 | Retained; public ownership arguments changed to RequestScope, assistant reads require agent grant; 30-minute PSN cadence retained; history-removal intermediate superseded by final history callback |
+| `src/providers/personal.rs` | rewritten | 84 / 0 | Retained with current behavior |
+
 ## Public API changes
 
 Complete exact signatures, re-exports and source locations for every changed Rust file are in [recovery-inventory.json](recovery-inventory.json). Changed signatures appear once as a removal and once as an addition. This is an exact source declaration inventory, not a claim that each declaration was reachable through every old module export.
@@ -309,7 +328,7 @@ Core baseline: parent of `e4a9b96`; recovery includes upstream through `658387e`
 | `src/connection_ingestion_tests.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 | `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 | `src/map_scene.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
-| `src/storage/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/spans.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
 
 ### Core 368df63 — Fix lint and agent tool-set test for WiZ tool
 
@@ -396,6 +415,328 @@ Core baseline: parent of `e4a9b96`; recovery includes upstream through `658387e`
 | `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 | `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 | `src/fresh_connections.rs` | rewritten | Superseded: preserve labelled observed ranges; no deletion of history or synthetic evenly-spaced sessions |
+
+### Core e6f2f78 — Log failed connection refreshes; 409 when a sync is already running
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 7db8b59 — One user per verified email: unify accounts at sign-in
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `services/api/identity_token.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/auth.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/account_linking.rs` | newly added | Retained explicit proven-identity linking; automatic verified-email merging superseded; preserve context IDs and encryption provenance |
+| `src/lib.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 4d31e58 — Bump vox-connections: PlayStation first sync on connect
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core fd78708 — Run connection refresh in a detached task so a dropped request cannot orphan the lease
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `services/api/routes/connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core fc431f8 — Replace location activity tracking with Maps Timeline import (#123)
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261006000000_remove_location_activity.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/location.rs` | deleted | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/state.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/visits.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/consent.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/fresh_connections.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/lib.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/location_ingestion.rs` | deleted | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/spans.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core 8b550e9 — Add Pulse discovery and cached chart execution
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Dockerfile` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Dockerfile.worker` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `build.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `docs/pulse-discovery-verification.md` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `docs/pulse-evidence/suggestions-fixture.png` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `docs/superpowers/plans/2026-10-06-pulse-discovery.md` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `docs/superpowers/specs/2026-10-06-pulse-discovery-design.md` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261006000001_pulse_discovery.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261006000002_pulse_cache_coalescing.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/pulse.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/execution.rs` | newly added | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/measurements.rs` | newly added | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/mod.rs` | newly added | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/service.rs` | newly added | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/tests.rs` | newly added | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/domain/pulse.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/pulse.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 517c058 — Pulse suggestions: Gemini-only, 3 min timeout, persist until manual refresh
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core 3309294 — Fix clippy lints blocking push
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/tests.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core ff93b53 — Pulse: 8 suggestions, generate more, prompt-driven suggestions
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/tests.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 495b868 — Pulse: iterative chart composer endpoint and shiftable time windows (offset_days)
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/execution.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/tests.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 55a5c83 — Pulse: allow day/week/month series for PlayStation observed playtime increases
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core e074ae6 — Pulse: weekly/monthly PlayStation series from observed increases and estimated sessions
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core 35889db — Fix pulse_cached_aggregate call: restore $3 bind broken by window refactor
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/application/pulse/execution.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core aad7453 — cargo fmt
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/application/pulse/execution.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core a9556bc — Pulse: stat chart type with headline total; cap discovery candidates at 12
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/execution.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/charts.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/domain/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 45d8244 — Pulse: keep time ranges out of generated chart titles
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core b64aebe — Pulse: all-time windows up to 10 years (week/month buckets beyond a year)
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/execution.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core 453cdd5 — Pulse: rank category charts by value and add top_n
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/execution.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/tests.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core ec832ec — Pulse: generic numeric measurements, schema field hints, connector title/place dimensions
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 78d0f01 — Pulse goals: saving and data-driven goals with pace, projection and chat drafting
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261007000000_pulse_goals.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/service/goals.rs` | newly added | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/domain/pulse_goals.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/pulse_goals.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core e21c93b — Pulse compose: lenient model output parsing and failure logging
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/agents/chart_suggester.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core 507fe4a — SMS: keep card transaction details from OTP messages, redact the code, record as authorization attempts
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/events/handler.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/sms_ingestion/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 198b241 — SMS: recognise more bank OTP layouts, dedupe authorization attempts separately, label them in Pulse
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/events/handler.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/sms_ingestion/finance.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/sms_ingestion/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 0f85d0a — Spaces: agent proposes goals on nodes; user approval creates the Pulse goal and links it to the node
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261007000001_goal_space_node_link.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/spaces.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/space_runtime.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/space_goals.rs` | newly added | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/service/goals.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/pulse_goals.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/pulse_goals.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core cee2f29 — Money: route completed payments to structured records, structure event-agent money, add All spending measurement, clean up existing rows
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `contracts/openapi.base.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `contracts/openapi.json` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261007000002_structure_event_agent_money.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/tools/event_actions.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/execution.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/application/pulse/measurements.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/events/handler.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/jev/event_triage.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/sms_ingestion/mod.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 78ea3d8 — Fix cleanup migration: temp table must survive autocommit (psql) as well as a transaction
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `migrations/20261007000002_structure_event_agent_money.sql` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+
+### Core 26f5ce1 — Spans: per-day counts and keyset-paginated day endpoints with range index
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `migrations/20261007000000_span_day_range_index.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/domain/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/spans.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core 68349c2 — Spans: per-user revision, collection-scoped day endpoints
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `migrations/20261007000001_span_revisions.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/domain/spans.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/spans.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+
+### Core ba13964 — Port span day endpoints, revisions, chart delete, auto space titles, JSON logs, stale-event triage and finance schema seeding onto main
+
+| File | Classification | Recovery disposition |
+| --- | --- | --- |
+| `Cargo.lock` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `Cargo.toml` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `examples/merge_schemas.rs` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261007000000_span_day_range_index.sql` | deleted | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261007000001_span_revisions.sql` | deleted | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261008000000_span_day_range_index.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261008000001_span_revisions.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `migrations/20261008000002_seed_finance_schemas.sql` | newly added | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/openapi.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/router.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `services/api/routes/spaces.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/agents/space_architect.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/application/pulse/service.rs` | rewritten | Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution |
+| `src/domain/spaces.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/events/handler.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/storage/pulse.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
+| `src/telemetry.rs` | rewritten | Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable |
 
 
 ## Data that the code restoration cannot recover

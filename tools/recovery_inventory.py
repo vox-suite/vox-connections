@@ -5,7 +5,7 @@ parser=argparse.ArgumentParser(description='Reproduce recovery file and public-d
 parser.add_argument('--core',type=Path,required=True)
 args=parser.parse_args()
 r=Path(__file__).resolve().parents[1];core=args.core.resolve()
-shas=['61073aa1007870f573d35ebb5285dfe9ee5d98c1','da37dcb2082986e8cc1f34c2d9d9d15daacc5dae','e759fbe7ba4be9127d8a533b4c5a9f69d342cef1','9bbf2d4fbcbb260fab6aae15de17fc575ee09075','e4d108df64413d19521f968d940f94ddeab8900b','4eafba6893bfa351aafe3d5ff571042ffeaacf3d','f93cde6','4379e21','6f43efb']
+shas=['61073aa1007870f573d35ebb5285dfe9ee5d98c1','da37dcb2082986e8cc1f34c2d9d9d15daacc5dae','e759fbe7ba4be9127d8a533b4c5a9f69d342cef1','9bbf2d4fbcbb260fab6aae15de17fc575ee09075','e4d108df64413d19521f968d940f94ddeab8900b','4eafba6893bfa351aafe3d5ff571042ffeaacf3d','f93cde6','4379e21','6f43efb','be81418','99458ac','f61edd9']
 def git(repo,*args):return subprocess.check_output(['git','-C',str(repo),*args],stderr=subprocess.DEVNULL).decode()
 def src(repo,ref,path):
  try:return git(repo,'show',ref+':'+path)
@@ -24,7 +24,7 @@ def api(text):
    depth += (text[i]=='{')-(text[i]=='}');i+=1
   out.append({'line':text[:m.start()].count('\n')+1,'declaration':text[m.start():i].strip(),'kind':'public_trait_contract'})
  return out
-records=[];lines=['# Recovery inventory','', 'Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tip: `6f43efb0ad984cd17c3b37ba4ddf73b850fb5e37`.','', 'This inventory records the original five commits and four subsequently published Connections commits, plus every corresponding Core change. It records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.','', 'The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these nine commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.','', '## Per-commit file changes','']
+records=[];lines=['# Recovery inventory','', 'Baseline: `6259e0e95b4db8a3da91d553c3b321b102d4aec9`; audited tips: Connections main `99458ac` plus Maps `f61edd9`; Core main `ba13964`.','', 'This inventory records the original five commits and seven subsequently published Connections commits, plus every corresponding Core change. It records every changed file per commit, exact public Rust declaration signatures and re-exports before/after, and recovery dispositions. Public declaration records include declarations inside modules; module visibility is recorded in the same inventory. Git additions/deletions measure diff lines, not independent features.','', 'The author’s apparent intent was a curated native account/timeline replacement followed by provider expansion. There are no explicit revert commits in these twelve commits. Zomato was replaced with OAuth history, not restored with its earlier search/handoff service.','', '## Per-commit file changes','']
 for sha in shas:
  sha=git(r,'rev-parse',sha).strip()
  parent=git(r,'rev-parse',sha+'^').strip();message=git(r,'log','-1','--format=%s',sha).strip()
@@ -71,6 +71,8 @@ for sha in git(core,'rev-list','--reverse','e4a9b96..origin/main').splitlines():
  lines += [f'### Core {sha[:7]} — {message}', '', '| File | Classification | Recovery disposition |', '| --- | --- | --- |']
  for row in git(core,'diff','--name-status','--no-renames',parent,sha).splitlines():
   status,path=row.split('\t',1); rec={'commit':sha,'parent':parent,'path':path,'status':status,'classification':{'D':'deleted','A':'newly added','M':'rewritten'}[status],'disposition':('Superseded: preserve labelled observed ranges; no deletion of history or synthetic evenly-spaced sessions' if sha.startswith(('7c840e8','658387e')) and path=='src/fresh_connections.rs' else 'Retained; subject cache checks stay scoped; shared implementations delegated to Connections where applicable')}
+  if path=='src/account_linking.rs': rec['disposition']='Retained explicit proven-identity linking; automatic verified-email merging superseded; preserve context IDs and encryption provenance'
+  if path.startswith(('src/application/pulse','src/storage/spans','src/agents/tools/space_goals')): rec['disposition']='Retained new charts/goals/day endpoints with native context isolation and explicit agent grants; composite spending withheld from agents pending contributor-scoped execution'
   if path.endswith('.rs'): rec['public_before']=api(src(core,parent,path));rec['public_after']=api(src(core,sha,path))
   core_commits.append(rec); lines.append(f"| `{path}` | {rec['classification']} | {rec['disposition']} |")
  lines.append('')

@@ -478,6 +478,7 @@ pub fn parse_youtube_history(
 
 fn parse_lat_lng(raw: &str) -> Option<(f64, f64)> {
     let (lat, lng) = raw
+        .trim_start_matches("geo:")
         .replace('°', "")
         .split_once(',')
         .map(|(a, b)| (a.trim().to_owned(), b.trim().to_owned()))?;
@@ -576,6 +577,19 @@ pub fn parse_maps_timeline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn maps_history_requires_an_array_and_preserves_only_observed_visits() {
+        assert!(parse_maps_timeline(&json!({"error":"failed"})).is_err());
+        assert_eq!(parse_maps_timeline(&json!([])).unwrap().0.len(), 0);
+        let valid = json!({"startTime":"2026-01-01T08:00:00Z","endTime":"2026-01-01T09:00:00Z","visit":{"topCandidate":{"placeLocation":{"latLng":"geo:12.9,77.6"}}}});
+        let (items, skipped) = parse_maps_timeline(&json!([valid,{"visit":{}}])).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(skipped, 1);
+        assert_eq!(
+            items[0].ended_at.unwrap() - items[0].occurred_at,
+            chrono::Duration::hours(1)
+        );
+    }
     #[test]
     fn playback_uses_played_at_without_fabricated_end() {
         let data = json!({"items":[{"played_at":"2026-01-01T12:00:00Z","track":{"id":"track","name":"Song","duration_ms":600000}},{"track":{"id":"missing"}}]});
