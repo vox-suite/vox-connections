@@ -13167,126 +13167,126 @@
     ],
     "src/storage/pulse.rs": [
       {
-        "line": 6,
+        "line": 8,
         "declaration": "pub const ALLOWED_SPANS: &str = r#\"s.user_id=$1 AND s.user_context_id=(SELECT CASE WHEN count(*)=1 THEN min(id::text)::uuid END FROM (SELECT u.id FROM user_contexts u JOIN platform_deployments d ON d.id=u.deployment_id JOIN host_apps h ON h.id=u.host_app_id AND h.deployment_id=d.id WHERE u.user_id=$1 AND u.host_user_id IN ($1::text,'vox-account:'||$1::text) AND u.organization_id IS NULL AND d.external_key='vox.standalone.deployment' AND h.external_key='vox.standalone.web') native) AND (s.schema_id IS NULL OR EXISTS(SELECT 1 FROM data_schemas ds WHERE ds.id=s.schema_id AND ds.state='active' AND (ds.user_id=$1 OR ds.user_id IS NULL))) AND (NOT(s.data ? 'connection_id') OR EXISTS(SELECT 1 FROM vox_connections c WHERE c.id::text=s.data->>'connection_id' AND c.user_id=$1 AND c.user_context_id=s.user_context_id AND c.authorization_state='authorized' AND c.assistant_read AND c.sync_timeline AND c.consented_at IS NOT NULL) OR EXISTS(SELECT 1 FROM external_connections x WHERE x.id::text=s.data->>'connection_id' AND x.user_context_id=s.user_context_id AND x.authorization_state='authorized' AND (x.expires_at IS NULL OR x.expires_at>now()) AND NOT EXISTS(SELECT 1 FROM vox_connections c WHERE c.id=x.id)))\"#"
       },
       {
-        "line": 7,
+        "line": 9,
         "declaration": "pub const ACTUAL_SPANS: &str = r#\"s.status='done' AND COALESCE(s.data->>'direction','')<>'due' AND COALESCE(s.data->>'duplicate_of','')=''\"#"
       },
       {
-        "line": 8,
+        "line": 10,
         "declaration": "pub const FLAT_DATA: &str = r#\"s.data || COALESCE((SELECT jsonb_object_agg('provider_data.'||e.key,e.value) FROM jsonb_each(CASE WHEN jsonb_typeof(s.data->'provider_data')='object' THEN s.data->'provider_data' ELSE '"
       },
       {
-        "line": 9,
+        "line": 11,
         "declaration": "pub const ACTION: &str = \"COALESCE(s.data#>>'"
       },
       {
-        "line": 10,
+        "line": 12,
         "declaration": "pub const TIMING: &str = \"COALESCE(s.data->>'timing','')\""
       },
       {
-        "line": 13,
+        "line": 15,
         "declaration": "pub struct Inventory"
       },
       {
-        "line": 19,
+        "line": 21,
         "declaration": "pub struct PulseMetadata"
       },
       {
-        "line": 30,
+        "line": 32,
         "declaration": "pub struct PulseRepository"
       },
       {
-        "line": 34,
+        "line": 36,
         "declaration": "pub fn new(pool: PgPool) -> Self"
       },
       {
-        "line": 37,
+        "line": 39,
         "declaration": "pub async fn metadata( &self, user: Uuid, cursor: Option<Uuid>, ) -> Result<PulseMetadata, sqlx::Error>"
       },
       {
-        "line": 77,
+        "line": 79,
         "declaration": "pub async fn profiles(&self, user: Uuid) -> Result<Vec<SourceProfile>, sqlx::Error>"
       },
       {
-        "line": 80,
+        "line": 82,
         "declaration": "pub async fn inventory(&self, user: Uuid) -> Result<Inventory, sqlx::Error>"
       },
       {
-        "line": 121,
+        "line": 123,
         "declaration": "pub async fn put_cache( &self, user: Uuid, key: &str, payload: serde_json::Value, seconds: i32, ) -> Result<(), sqlx::Error>"
       },
       {
-        "line": 132,
+        "line": 134,
         "declaration": "pub async fn delete_chart(&self, user: Uuid, id: Uuid) -> Result<bool, sqlx::Error>"
       },
       {
-        "line": 140,
+        "line": 142,
         "declaration": "pub async fn dismiss(&self, user: Uuid, hash: &str) -> Result<(), sqlx::Error>"
       },
       {
-        "line": 144,
+        "line": 146,
         "declaration": "pub async fn save( &self, user: Uuid, input: &SavePulseInput, revision: &str, hash: &str, ) -> Result<SavedPulseChart, sqlx::Error>"
       },
       {
-        "line": 14,
+        "line": 16,
         "declaration": "pub profiles: Vec<SourceProfile>,",
         "kind": "public_field"
       },
       {
-        "line": 15,
+        "line": 17,
         "declaration": "pub source_count: usize,",
         "kind": "public_field"
       },
       {
-        "line": 16,
+        "line": 18,
         "declaration": "pub record_count: i64,",
         "kind": "public_field"
       },
       {
-        "line": 20,
+        "line": 22,
         "declaration": "pub revision: String,",
         "kind": "public_field"
       },
       {
-        "line": 21,
+        "line": 23,
         "declaration": "pub connections: Vec<PulseConnection>,",
         "kind": "public_field"
       },
       {
-        "line": 22,
+        "line": 24,
         "declaration": "pub charts: Vec<SavedPulseChart>,",
         "kind": "public_field"
       },
       {
-        "line": 23,
+        "line": 25,
         "declaration": "pub dismissed: Vec<String>,",
         "kind": "public_field"
       },
       {
-        "line": 24,
+        "line": 26,
         "declaration": "pub saved_hashes: Vec<String>,",
         "kind": "public_field"
       },
       {
-        "line": 25,
+        "line": 27,
         "declaration": "pub caches: serde_json::Value,",
         "kind": "public_field"
       },
       {
-        "line": 26,
+        "line": 28,
         "declaration": "pub legacy_boards: Vec<serde_json::Value>,",
         "kind": "public_field"
       },
       {
-        "line": 27,
+        "line": 29,
         "declaration": "pub next_cursor: Option<Uuid>,",
         "kind": "public_field"
       },
       {
-        "line": 31,
+        "line": 33,
         "declaration": "pub pool: PgPool,",
         "kind": "public_field"
       }
@@ -13505,39 +13505,39 @@
         "declaration": "pub async fn create_for_owner( &self, owner: crate::identity::ResourceOwner, input: NewSpan, ) -> Result<Span, sqlx::Error>"
       },
       {
-        "line": 68,
+        "line": 78,
         "declaration": "pub async fn record(&self, user_id: Uuid, input: NewSpan) -> Result<Uuid, sqlx::Error>"
       },
       {
-        "line": 88,
+        "line": 98,
         "declaration": "pub async fn record_in_transaction( tx: &mut Transaction<'_, Postgres>, user_id: Uuid, input: NewSpan, ) -> Result<Uuid, sqlx::Error>"
       },
       {
-        "line": 108,
+        "line": 118,
         "declaration": "pub async fn get_by_id(&self, user_id: Uuid, id: Uuid) -> Result<Option<Span>, sqlx::Error>"
       },
       {
-        "line": 120,
+        "line": 130,
         "declaration": "pub async fn list(&self, user_id: Uuid, query: &SpanQuery) -> Result<Vec<Span>, sqlx::Error>"
       },
       {
-        "line": 147,
+        "line": 157,
         "declaration": "pub async fn revision(&self, user_id: Uuid) -> Result<i64, sqlx::Error>"
       },
       {
-        "line": 157,
+        "line": 167,
         "declaration": "pub async fn day_counts( &self, user_id: Uuid, collection_id: Option<Uuid>, bounds: &[(NaiveDate, DateTime<Utc>, DateTime<Utc>)], ) -> Result<Vec<SpanDaySummary>, sqlx::Error>"
       },
       {
-        "line": 210,
+        "line": 220,
         "declaration": "pub async fn day_page( &self, user_id: Uuid, collection_id: Option<Uuid>, start: DateTime<Utc>, end: DateTime<Utc>, after: Option<(DateTime<Utc>, Uuid)>, limit: i64, ) -> Result<Vec<Span>, sqlx::Error>"
       },
       {
-        "line": 246,
+        "line": 256,
         "declaration": "pub async fn update( &self, user_id: Uuid, id: Uuid, patch: SpanPatch, ) -> Result<ConcurrencyOutcome<Span>, sqlx::Error>"
       },
       {
-        "line": 339,
+        "line": 349,
         "declaration": "pub async fn delete(&self, user_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>"
       }
     ],
