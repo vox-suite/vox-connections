@@ -21,25 +21,5 @@ base64 = "0.23.1"
 tokio = { version = "1.53.1", features = ["net", "time", "sync", "rt", "rt-multi-thread", "macros"] }
 ring = "0.17.14"
 tracing = "0.1"
-futures-util = "0.3"
-hmac = "0.12"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-yaml_serde = "0.10.7"
-jsonschema = { version = "0.57", default-features = false }
+[dev-dependencies]
 axum = { version = "0.8" }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
-subtle = "2"
-bytes = "1"
-
-[[bin]]
-name = "vox-connections-service"
-path = "src/bin/server.rs"
-
-[[bin]]
-name = "vox"
-path = "src/bin/vox.rs"
-
-[[bin]]
-name = "vox-google-read-mcp"
-path = "src/bin/google_read_mcp.rs"

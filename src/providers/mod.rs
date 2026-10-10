@@ -1,51 +1,14 @@
-pub mod gmail;
-pub mod amazon;
-pub mod expedia;
-pub mod playstation;
-pub mod playstation_account;
-pub mod uber;
-pub mod zomato;
-
-pub use amazon::{
-    AMAZON_CAPABILITY_CATALOG_SEARCH, AMAZON_CAPABILITY_CATALOG_SEARCH_SHORT,
-    AMAZON_CAPABILITY_ITEM_LOOKUP, AMAZON_CAPABILITY_ITEM_LOOKUP_SHORT,
-    AMAZON_CAPABILITY_PURCHASE_HANDOFF, AMAZON_CAPABILITY_PURCHASE_HANDOFF_SHORT,
-    AMAZON_INTEGRATION_KEY, AMAZON_OFFICIAL_LOCALES, AmazonCatalogItem,
-    AmazonCatalogSearchResponse, AmazonError, AmazonHandoffRequest, AmazonHandoffResponse,
-    AmazonProviderClient, AmazonService, DefaultAmazonProviderClient, MockAmazonProviderClient,
-};
-pub use playstation::{
-    DefaultPlayStationProviderClient, MockPlayStationProviderClient,
-    PLAYSTATION_CAPABILITY_GAME_ACTIVITY, PLAYSTATION_CAPABILITY_GAME_ACTIVITY_SHORT,
-    PLAYSTATION_CAPABILITY_RECENTLY_PLAYED, PLAYSTATION_CAPABILITY_RECENTLY_PLAYED_SHORT,
-    PLAYSTATION_CAPABILITY_USER_TITLES, PLAYSTATION_CAPABILITY_USER_TITLES_SHORT,
-    PLAYSTATION_INTEGRATION_KEY, PlayStationError, PlayStationGame, PlayStationProviderClient,
-    PlayStationRecentActivityResponse, PlayStationService,
-};
-pub use uber::{
-    DefaultUberProviderClient, MockUberProviderClient, UBER_CAPABILITY_HISTORY,
-    UBER_CAPABILITY_HISTORY_LITE, UBER_CAPABILITY_HISTORY_LITE_SHORT,
-    UBER_CAPABILITY_HISTORY_SHORT, UBER_CAPABILITY_RIDE_ESTIMATE,
-    UBER_CAPABILITY_RIDE_ESTIMATE_SHORT, UBER_CAPABILITY_RIDE_REQUEST,
-    UBER_CAPABILITY_RIDE_REQUEST_SHORT, UBER_INTEGRATION_KEY, UberConnectedReadService,
-    UberHistoryResponse, UberProviderClient, UberRawHistoryResponse, UberRawTrip, UberReadError,
-    UberRideEstimateRequest, UberRideEstimateResponse, UberRideHandoffRequest,
-    UberRideHandoffResponse, UberRideOption, UberTrip,
-};
-pub use zomato::{
-    DefaultZomatoProviderClient, MockZomatoProviderClient, ZOMATO_CAPABILITY_ORDER_HANDOFF,
-    ZOMATO_CAPABILITY_ORDER_HANDOFF_SHORT, ZOMATO_CAPABILITY_RESTAURANT_SEARCH,
-    ZOMATO_CAPABILITY_RESTAURANT_SEARCH_SHORT, ZOMATO_CAPABILITY_RESTAURANT_VIEW,
-    ZOMATO_CAPABILITY_RESTAURANT_VIEW_SHORT, ZOMATO_INTEGRATION_KEY, ZomatoError,
-    ZomatoHandoffRequest, ZomatoHandoffResponse, ZomatoHandoffType, ZomatoProviderClient,
-    ZomatoRestaurant, ZomatoSearchResponse, ZomatoService,
-};
-
 pub mod food_delivery;
-pub(crate) mod food_oauth;
+pub mod gmail;
 pub mod google_calendar;
 pub mod observations;
-pub mod personal;
+pub mod playstation;
 pub mod psn;
 pub mod swiggy;
+pub mod zomato;
+
 pub use food_delivery::*;
+
+pub(crate) mod food_oauth;
+
+pub mod personal;

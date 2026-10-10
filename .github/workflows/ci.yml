@@ -27,7 +27,6 @@ jobs:
           --health-retries 10
     env:
       PGPASSWORD: postgres
-      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/vox_independent
       CONNECTIONS_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/vox_connectors
     steps:
       - uses: actions/checkout@v4
@@ -41,17 +40,3 @@ jobs:
         run: |
           createdb -h 127.0.0.1 -U postgres vox_connectors
           cargo test --locked --lib accounts::tests -- --ignored
-      - name: Independent host platform, schemas and reviewed setup
-        run: |
-          createdb -h 127.0.0.1 -U postgres vox_independent
-          for schema_file in examples/independent_host_schema.sql schema/connectors.sql schema/public-mcp.sql schema/skill-content.sql schema/discovery.sql schema/playstation.sql schema/packages.sql schema/setup.sql schema/accounts.sql schema/account-authority.sql; do
-            psql -h 127.0.0.1 -U postgres -d vox_independent -v ON_ERROR_STOP=1 -f "$schema_file"
-          done
-          cargo test --locked --test postgres_integration --test setup_integration --test google_read_integration --test provider_recovery -- --ignored
-      - name: Bounded metadata loading and drift
-        run: |
-          createdb -h 127.0.0.1 -U postgres vox_metadata
-          for schema_file in examples/independent_host_schema.sql schema/connectors.sql schema/public-mcp.sql schema/skill-content.sql schema/discovery.sql schema/packages.sql schema/setup.sql; do
-            psql -h 127.0.0.1 -U postgres -d vox_metadata -v ON_ERROR_STOP=1 -f "$schema_file"
-          done
-          TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/vox_metadata cargo test --locked --test metadata_load -- --ignored

@@ -47,7 +47,7 @@ impl FreshConnectionsService {
                 && self.swiggy.client.enabled(),
         }
     }
-    pub(crate) async fn sync_swiggy_in_context(
+    pub async fn sync_swiggy(
         &self,
         user_id: Uuid,
         id: Uuid,
