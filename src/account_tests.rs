@@ -49,21 +49,125 @@ async fn fixture() -> (FreshConnectionsService, Uuid, Uuid) {
         .connect(&url)
         .await
         .unwrap();
-    sqlx::raw_sql("CREATE TABLE users(id UUID PRIMARY KEY)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::raw_sql(include_str!("../schema/connectors.sql"))
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../examples/independent_host_schema.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/connectors.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/packages.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/skill-content.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/public-mcp.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/setup.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/discovery.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/accounts.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        &include_str!("../schema/account-authority.sql")
+            .replace("public.", "")
+            .replace(
+                "SELECT pg_catalog.set_config('search_path', '', false);",
+                "",
+            ),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let user = Uuid::new_v4();
     sqlx::query("INSERT INTO users VALUES($1)")
         .bind(user)
         .execute(&pool)
         .await
         .unwrap();
-    let id=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,consented_at) VALUES($1,'google_calendar',now()) RETURNING id").bind(user).fetch_one(&pool).await.unwrap();
+    let deployment: Uuid = sqlx::query_scalar(
+        "INSERT INTO platform_deployments(external_key) VALUES($1) RETURNING id",
+    )
+    .bind(format!("test-{user}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO user_contexts(id,deployment_id,user_id) VALUES($1,$2,$1)")
+        .bind(user)
+        .bind(deployment)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let id=sqlx::query_scalar("INSERT INTO vox_connections(user_id,user_context_id,connector_id,consented_at) VALUES($1,$1,'google_calendar',now()) RETURNING id").bind(user).fetch_one(&pool).await.unwrap();
     (
         FreshConnectionsService::new(
             pool,
@@ -88,7 +192,7 @@ async fn lease_serializes_and_pause_disconnect_fence_commits() {
     let mut tx = svc.pool.begin().await.unwrap();
     assert!(svc.validate_commit(&mut tx, user, id, &claim).await.is_ok());
     tx.rollback().await.unwrap();
-    svc.update_preferences(
+    svc.update_preferences_in_context(
         user,
         id,
         PreferencesRequest {
@@ -105,7 +209,7 @@ async fn lease_serializes_and_pause_disconnect_fence_commits() {
             .is_err()
     );
     tx.rollback().await.unwrap();
-    svc.update_preferences(
+    svc.update_preferences_in_context(
         user,
         id,
         PreferencesRequest {
@@ -120,7 +224,7 @@ async fn lease_serializes_and_pause_disconnect_fence_commits() {
         .await
         .unwrap();
     let claim = svc.claim(user, id).await.unwrap();
-    svc.disconnect(user, id).await.unwrap();
+    svc.disconnect_in_context(user, id).await.unwrap();
     let mut tx = svc.pool.begin().await.unwrap();
     assert!(
         svc.validate_commit(&mut tx, user, id, &claim)
@@ -133,7 +237,7 @@ async fn lease_serializes_and_pause_disconnect_fence_commits() {
 async fn setup_is_owned_cancelled_and_expired_without_provider_calls() {
     let (svc, user, _) = fixture().await;
     assert!(
-        svc.start(
+        svc.start_in_context(
             user,
             StartConnectionRequest {
                 connector_id: "google_calendar".into(),
@@ -145,7 +249,7 @@ async fn setup_is_owned_cancelled_and_expired_without_provider_calls() {
         .is_err()
     );
     let setup = svc
-        .start(
+        .start_in_context(
             user,
             StartConnectionRequest {
                 connector_id: "google_calendar".into(),
@@ -156,8 +260,12 @@ async fn setup_is_owned_cancelled_and_expired_without_provider_calls() {
         .await
         .unwrap();
     let id = setup.setup_id.unwrap();
-    assert!(svc.get_setup_status(Uuid::new_v4(), id).await.is_err());
-    svc.cancel_setup(user, id).await.unwrap();
+    assert!(
+        svc.get_setup_status_in_context(Uuid::new_v4(), id)
+            .await
+            .is_err()
+    );
+    svc.cancel_setup_in_context(user, id).await.unwrap();
     let state: String =
         sqlx::query_scalar("SELECT state_token FROM vox_connection_setups WHERE id=$1")
             .bind(id)
@@ -166,11 +274,14 @@ async fn setup_is_owned_cancelled_and_expired_without_provider_calls() {
             .unwrap();
     assert!(svc.handle_google_callback("unused", &state).await.is_err());
     assert_eq!(
-        svc.get_setup_status(user, id).await.unwrap().status,
+        svc.get_setup_status_in_context(user, id)
+            .await
+            .unwrap()
+            .status,
         "cancelled"
     );
     let setup = svc
-        .start(
+        .start_in_context(
             user,
             StartConnectionRequest {
                 connector_id: "google_calendar".into(),
@@ -188,7 +299,7 @@ async fn setup_is_owned_cancelled_and_expired_without_provider_calls() {
     .await
     .unwrap();
     assert_eq!(
-        svc.get_setup_status(user, setup.setup_id.unwrap())
+        svc.get_setup_status_in_context(user, setup.setup_id.unwrap())
             .await
             .unwrap()
             .status,
@@ -225,7 +336,7 @@ async fn rotation_is_fenced_and_worker_recovers_expired_leases() {
         .await
         .unwrap();
     assert!(svc.claim(user, id).await.is_err());
-    svc.update_preferences(
+    svc.update_preferences_in_context(
         user,
         id,
         PreferencesRequest {
@@ -236,11 +347,11 @@ async fn rotation_is_fenced_and_worker_recovers_expired_leases() {
     .await
     .unwrap();
     assert!(
-        svc.assistant_read(user, "google_calendar", 10)
+        svc.assistant_read_in_context(user, "google_calendar", 10)
             .await
             .is_err()
     );
-    let account = svc.list_connections(user).await.unwrap();
+    let account = svc.list_connections_in_context(user).await.unwrap();
     assert!(!account[0].assistant_read);
     assert_ne!(
         old.get::<Uuid, _>("lease_token"),
@@ -285,7 +396,7 @@ async fn google_link_is_single_use_denial_and_scope_reduction_fail_closed() {
         });
         svc.google.test_origin(&origin);
         let setup = svc
-            .start(
+            .start_in_context(
                 user,
                 StartConnectionRequest {
                     connector_id: "google_calendar".into(),
@@ -307,16 +418,19 @@ async fn google_link_is_single_use_denial_and_scope_reduction_fail_closed() {
         assert_eq!(result.is_ok(), !reduced);
         assert!(svc.handle_google_callback("code", &state).await.is_err());
         assert_eq!(
-            svc.get_setup_status(user, id).await.unwrap().status,
+            svc.get_setup_status_in_context(user, id)
+                .await
+                .unwrap()
+                .status,
             if reduced { "failed" } else { "authorized" }
         );
         if !reduced {
             let read = svc
-                .assistant_read(user, "google_calendar", 10)
+                .assistant_read_in_context(user, "google_calendar", 10)
                 .await
                 .unwrap();
             assert_eq!(read["complete"], true);
-            svc.update_preferences(
+            svc.update_preferences_in_context(
                 user,
                 result.unwrap(),
                 PreferencesRequest {
@@ -327,13 +441,13 @@ async fn google_link_is_single_use_denial_and_scope_reduction_fail_closed() {
             .await
             .unwrap();
             assert!(
-                svc.assistant_read(user, "google_calendar", 10)
+                svc.assistant_read_in_context(user, "google_calendar", 10)
                     .await
                     .is_err()
             );
         }
         let setup = svc
-            .start(
+            .start_in_context(
                 user,
                 StartConnectionRequest {
                     connector_id: "google_calendar".into(),
@@ -354,7 +468,10 @@ async fn google_link_is_single_use_denial_and_scope_reduction_fail_closed() {
         svc.fail_google_setup(&state).await.unwrap();
         assert!(svc.handle_google_callback("code", &state).await.is_err());
         assert_eq!(
-            svc.get_setup_status(user, id).await.unwrap().status,
+            svc.get_setup_status_in_context(user, id)
+                .await
+                .unwrap()
+                .status,
             "failed"
         );
         server.abort();
@@ -403,12 +520,12 @@ async fn provider_results_are_discarded_after_pause_or_disconnect() {
         });
         svc.google.test_origin(&origin);
         let background = svc.clone();
-        let sync = tokio::spawn(async move { background.refresh(user, id).await });
+        let sync = tokio::spawn(async move { background.refresh_in_context(user, id).await });
         gate.reached.notified().await;
         if disconnect {
-            svc.disconnect(user, id).await.unwrap();
+            svc.disconnect_in_context(user, id).await.unwrap();
         } else {
-            svc.update_preferences(
+            svc.update_preferences_in_context(
                 user,
                 id,
                 PreferencesRequest {
@@ -421,7 +538,7 @@ async fn provider_results_are_discarded_after_pause_or_disconnect() {
         }
         gate.release.notify_one();
         assert!(sync.await.unwrap().is_err());
-        let accounts = svc.list_connections(user).await.unwrap();
+        let accounts = svc.list_connections_in_context(user).await.unwrap();
         if !disconnect {
             assert!(accounts[0].last_synced_at.is_none());
             assert!(!accounts[0].sync_timeline);
@@ -471,7 +588,7 @@ async fn provider_rotation_is_saved_even_when_the_following_fetch_fails() {
         .unwrap()
     });
     svc.google.test_origin(&origin);
-    assert!(svc.refresh(user, id).await.is_err());
+    assert!(svc.refresh_in_context(user, id).await.is_err());
     let ciphertext: Vec<u8> =
         sqlx::query_scalar("SELECT refresh_ciphertext FROM vox_connections WHERE id=$1")
             .bind(id)
@@ -486,7 +603,7 @@ async fn provider_rotation_is_saved_even_when_the_following_fetch_fails() {
         "rotated-refresh"
     );
     assert!(
-        svc.list_connections(user).await.unwrap()[0]
+        svc.list_connections_in_context(user).await.unwrap()[0]
             .last_synced_at
             .is_none()
     );
@@ -498,7 +615,7 @@ async fn provider_rotation_is_saved_even_when_the_following_fetch_fails() {
 async fn playstation_resume_preserves_high_water_and_requires_a_new_baseline() {
     let (svc, user, id) = fixture().await;
     sqlx::query("UPDATE vox_connections SET connector_id='playstation',metadata=$2 WHERE id=$1").bind(id).bind(serde_json::json!({"snapshots":{"game":{"total_seconds":100,"observed_at":Utc::now(),"last_played_at":null,"name":"Game","platform":"PS5"}}})).execute(&svc.pool).await.unwrap();
-    svc.update_preferences(
+    svc.update_preferences_in_context(
         user,
         id,
         PreferencesRequest {
@@ -508,7 +625,7 @@ async fn playstation_resume_preserves_high_water_and_requires_a_new_baseline() {
     )
     .await
     .unwrap();
-    svc.update_preferences(
+    svc.update_preferences_in_context(
         user,
         id,
         PreferencesRequest {
@@ -533,7 +650,7 @@ async fn playstation_resume_preserves_high_water_and_requires_a_new_baseline() {
 async fn disconnect_invalidates_pending_reconnect_setup() {
     let (svc, user, id) = fixture().await;
     let setup = svc
-        .start(
+        .start_in_context(
             user,
             StartConnectionRequest {
                 connector_id: "google_calendar".into(),
@@ -550,9 +667,9 @@ async fn disconnect_invalidates_pending_reconnect_setup() {
         .unwrap()
         .1
         .to_string();
-    svc.disconnect(user, id).await.unwrap();
+    svc.disconnect_in_context(user, id).await.unwrap();
     assert_eq!(
-        svc.get_setup_status(user, setup.setup_id.unwrap())
+        svc.get_setup_status_in_context(user, setup.setup_id.unwrap())
             .await
             .unwrap()
             .status,
@@ -612,9 +729,9 @@ async fn preference_change_retains_rotating_credentials_but_discards_sync() {
     });
     svc.google.test_origin(&origin);
     let background = svc.clone();
-    let sync = tokio::spawn(async move { background.refresh(user, id).await });
+    let sync = tokio::spawn(async move { background.refresh_in_context(user, id).await });
     gate.reached.notified().await;
-    svc.update_preferences(
+    svc.update_preferences_in_context(
         user,
         id,
         PreferencesRequest {
@@ -672,11 +789,12 @@ async fn transient_google_assistant_refresh_keeps_authorization_retryable() {
     });
     svc.google.test_origin(&origin);
     assert!(matches!(
-        svc.assistant_read(user, "google_calendar", 10).await,
+        svc.assistant_read_in_context(user, "google_calendar", 10)
+            .await,
         Err(FreshConnectionError::Provider(_))
     ));
     assert_eq!(
-        svc.list_connections(user).await.unwrap()[0].authorization_state,
+        svc.list_connections_in_context(user).await.unwrap()[0].authorization_state,
         "authorized"
     );
     server.abort();
@@ -769,7 +887,7 @@ async fn disconnect_fences_inflight_verified_sony_link() {
     let background = svc.clone();
     let link = tokio::spawn(async move {
         background
-            .start(
+            .start_in_context(
                 user,
                 StartConnectionRequest {
                     connector_id: "playstation".into(),
@@ -780,12 +898,17 @@ async fn disconnect_fences_inflight_verified_sony_link() {
             .await
     });
     gate.reached.notified().await;
-    svc.disconnect(user, id).await.unwrap();
+    svc.disconnect_in_context(user, id).await.unwrap();
     gate.release.notify_one();
     gate.reached.notified().await;
     gate.release.notify_one();
     assert!(link.await.unwrap().is_err());
-    assert!(svc.list_connections(user).await.unwrap().is_empty());
+    assert!(
+        svc.list_connections_in_context(user)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     server.abort();
 }
 
@@ -803,7 +926,7 @@ async fn food_expiry_without_refresh_requires_reconnect_and_releases_lease() {
     sqlx::query("UPDATE vox_connections SET connector_id='swiggy',access_ciphertext=$2,access_expires_at=now()-interval '1 minute',metadata='{\"auth_type\":\"oauth2\",\"client_id\":\"registered-client\"}' WHERE id=$1")
         .bind(id).bind(access).execute(&svc.pool).await.unwrap();
     assert!(matches!(
-        svc.refresh(user, id).await,
+        svc.refresh_in_context(user, id).await,
         Err(FreshConnectionError::Unauthorized)
     ));
     let row = sqlx::query(
@@ -852,11 +975,13 @@ async fn food_oauth_links_only_after_verified_reads_and_rejects_callback_replay(
         axum::serve(listener, app).await.unwrap();
     });
     let (mut svc, user, _) = fixture().await;
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    svc.ingestor = std::sync::Arc::new(CountingIngestor(calls.clone()));
     svc.swiggy.client.enabled = true;
     svc.swiggy.client.auth_base = base.clone();
     svc.swiggy.client.endpoint = format!("{base}/mcp");
     let setup = svc
-        .start(
+        .start_in_context(
             user,
             StartConnectionRequest {
                 connector_id: "swiggy".into(),
@@ -897,6 +1022,46 @@ async fn food_oauth_links_only_after_verified_reads_and_rejects_callback_replay(
         row.get::<Option<DateTime<Utc>>, _>("last_synced_at")
             .is_some()
     );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    svc.update_preferences_in_context(
+        user,
+        id,
+        PreferencesRequest {
+            sync_timeline: Some(false),
+            assistant_read: Some(false),
+        },
+    )
+    .await
+    .unwrap();
+    let start = svc
+        .start_in_context(
+            user,
+            StartConnectionRequest {
+                connector_id: "swiggy".into(),
+                consent: true,
+                npsso: None,
+            },
+        )
+        .await
+        .unwrap();
+    let auth = url::Url::parse(start.authorization_url.as_ref().unwrap()).unwrap();
+    let state = auth
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    assert_eq!(
+        svc.handle_food_callback("swiggy", Some("single-use-code"), &state)
+            .await
+            .unwrap(),
+        id
+    );
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "paused relink must neither ingest nor notify food history"
+    );
     server.abort();
 }
 
@@ -922,7 +1087,7 @@ async fn food_rotation_survives_subsequent_read_failure_and_sync_is_retryable() 
     sqlx::query("UPDATE vox_connections SET connector_id='swiggy',access_ciphertext=$2,refresh_ciphertext=$3,access_expires_at=now()-interval '1 minute',metadata='{\"auth_type\":\"oauth2\",\"client_id\":\"registered-client\"}' WHERE id=$1")
         .bind(id).bind(cipher.seal(aad.as_bytes(),"old-access").unwrap()).bind(cipher.seal(aad.as_bytes(),"old-refresh").unwrap()).execute(&svc.pool).await.unwrap();
     assert!(matches!(
-        svc.refresh(user, id).await,
+        svc.refresh_in_context(user, id).await,
         Err(FreshConnectionError::Provider(_))
     ));
     let row=sqlx::query("SELECT access_ciphertext,refresh_ciphertext,lease_token,failure_code,authorization_state FROM vox_connections WHERE id=$1").bind(id).fetch_one(&svc.pool).await.unwrap();
@@ -996,7 +1161,7 @@ async fn personal_fixture() -> (
     let counter = hits.clone();
     let router=axum::Router::new().fallback(move |request:axum::extract::Request|{let counter=counter.clone();async move {
         let path=request.uri().path().to_owned();
-        let method=request.method().clone();
+        let _method=request.method().clone();
         let response=match path.as_str(){
             "/api/token"|"/token"=>{let body=axum::body::to_bytes(request.into_body(),8192).await.unwrap();let fields=url::form_urlencoded::parse(&body).into_owned().collect::<std::collections::BTreeMap<_,_>>();assert!(fields.contains_key("client_id"));let n=counter.fetch_add(1,std::sync::atomic::Ordering::SeqCst);if fields.get("grant_type").is_some_and(|v|v=="refresh_token"){assert_eq!(fields.get("refresh_token").unwrap(),"refresh-initial");}else{assert_eq!(fields.get("code").unwrap(),"accepted-code");if path=="/api/token"{assert!(fields.contains_key("code_verifier"));}}json!({"access_token":format!("access-{n}"),"refresh_token":if n==0 {"refresh-initial"}else{"refresh-rotated"},"expires_in":3600})},
             "/v1/me"=>json!({"id":"verified-account","display_name":"Listener"}),
@@ -1023,7 +1188,7 @@ async fn personal_fixture() -> (
 async fn personal_spotify_oauth_encrypted_single_use_refresh_owned_and_deduped() {
     let (svc, user, server, hits) = personal_fixture().await;
     let start = svc
-        .start(
+        .start_in_context(
             user,
             StartConnectionRequest {
                 connector_id: "spotify".into(),
@@ -1074,7 +1239,13 @@ async fn personal_spotify_oauth_encrypted_single_use_refresh_owned_and_deduped()
     .execute(&svc.pool)
     .await
     .unwrap();
-    assert_eq!(svc.refresh(user, id).await.unwrap().spans_created, 0);
+    assert_eq!(
+        svc.refresh_in_context(user, id)
+            .await
+            .unwrap()
+            .spans_created,
+        0
+    );
     assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
     let row = sqlx::query("SELECT refresh_ciphertext FROM vox_connections WHERE id=$1")
         .bind(id)
@@ -1091,10 +1262,14 @@ async fn personal_spotify_oauth_encrypted_single_use_refresh_owned_and_deduped()
             .unwrap(),
         "refresh-rotated"
     );
-    assert!(svc.read_personal(Uuid::new_v4(), id).await.is_err());
-    let read = svc.read_personal(user, id).await.unwrap();
+    assert!(
+        svc.read_personal_in_context(Uuid::new_v4(), id)
+            .await
+            .is_err()
+    );
+    let read = svc.read_personal_in_context(user, id).await.unwrap();
     assert_eq!(read["data"]["recently_played"][0]["track"]["name"], "Song");
-    svc.update_preferences(
+    svc.update_preferences_in_context(
         user,
         id,
         PreferencesRequest {
@@ -1104,9 +1279,9 @@ async fn personal_spotify_oauth_encrypted_single_use_refresh_owned_and_deduped()
     )
     .await
     .unwrap();
-    assert!(svc.read_personal(user, id).await.is_err());
-    svc.disconnect(user, id).await.unwrap();
-    assert!(svc.refresh(user, id).await.is_err());
+    assert!(svc.read_personal_in_context(user, id).await.is_err());
+    svc.disconnect_in_context(user, id).await.unwrap();
+    assert!(svc.refresh_in_context(user, id).await.is_err());
     server.abort();
 }
 #[tokio::test]
@@ -1115,25 +1290,25 @@ async fn personal_history_import_requires_consent_dedupes_and_is_separate_from_o
     let (svc, user, server, _) = personal_fixture().await;
     let history = json!([{"products":["YouTube"],"title":"Watched Real video","titleUrl":"https://www.youtube.com/watch?v=abcdefghijk","time":"2026-01-01T12:00:00Z"},{"title":"Searched"}]);
     assert!(
-        svc.import_youtube_history(user, history.clone(), false)
+        svc.import_youtube_history_in_context(user, history.clone(), false)
             .await
             .is_err()
     );
     let result = svc
-        .import_youtube_history(user, history.clone(), true)
+        .import_youtube_history_in_context(user, history.clone(), true)
         .await
         .unwrap();
     assert_eq!(result["imported"], 1);
     assert_eq!(result["skipped"], 1);
     assert_eq!(result["complete"], false);
     assert_eq!(
-        svc.import_youtube_history(user, history, true)
+        svc.import_youtube_history_in_context(user, history, true)
             .await
             .unwrap()["imported"],
         0
     );
     let id: Uuid = serde_json::from_value(result["connection_id"].clone()).unwrap();
-    let read = svc.read_personal(user, id).await.unwrap();
+    let read = svc.read_personal_in_context(user, id).await.unwrap();
     assert_eq!(read["connector_id"], "youtube_history");
     assert_eq!(
         read["data"]["watch_history"][0]["provider_data"]["action"],
@@ -1156,7 +1331,7 @@ async fn personal_history_import_requires_consent_dedupes_and_is_separate_from_o
 async fn personal_youtube_oauth_reads_only_playlists_likes_and_subscription_snapshots() {
     let (svc, user, server, _) = personal_fixture().await;
     let start = svc
-        .start(
+        .start_in_context(
             user,
             StartConnectionRequest {
                 connector_id: "youtube".into(),
@@ -1181,7 +1356,7 @@ async fn personal_youtube_oauth_reads_only_playlists_likes_and_subscription_snap
         .handle_personal_callback("youtube", Some("accepted-code"), &state)
         .await
         .unwrap();
-    let read = svc.read_personal(user, id).await.unwrap();
+    let read = svc.read_personal_in_context(user, id).await.unwrap();
     assert_eq!(read["data"]["watch_history_available"], false);
     assert_eq!(read["data"]["subscriptions_are_snapshot"], true);
     let actions = read["data"]["playlist_items"]
@@ -1191,7 +1366,13 @@ async fn personal_youtube_oauth_reads_only_playlists_likes_and_subscription_snap
         .filter_map(|v| v["action"].as_str())
         .collect::<Vec<_>>();
     assert_eq!(actions, vec!["playlist_addition", "like"]);
-    assert_eq!(svc.refresh(user, id).await.unwrap().spans_created, 0);
+    assert_eq!(
+        svc.refresh_in_context(user, id)
+            .await
+            .unwrap()
+            .spans_created,
+        0
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM test_personal_items WHERE connector='youtube'"
@@ -1202,4 +1383,597 @@ async fn personal_youtube_oauth_reads_only_playlists_likes_and_subscription_snap
         2
     );
     server.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn curated_accounts_are_host_scoped_and_agent_grants_are_explicit() {
+    use crate::capability_grants::{CapabilityGrantService, CreateGrantRequest};
+    use crate::identity::{DeploymentId, RequestContext, RequestSubject, UserContextId, UserId};
+    let (svc, user, _) = fixture().await;
+    let deployment: Uuid =
+        sqlx::query_scalar("SELECT deployment_id FROM user_contexts WHERE id=$1")
+            .bind(user)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    let other: Uuid = sqlx::query_scalar(
+        "INSERT INTO user_contexts(deployment_id,user_id) VALUES($1,$2) RETURNING id",
+    )
+    .bind(deployment)
+    .bind(user)
+    .fetch_one(&svc.pool)
+    .await
+    .unwrap();
+    let context = RequestContext {
+        id: UserContextId(user),
+        user_id: UserId(user),
+        subject: RequestSubject {
+            deployment_id: DeploymentId(deployment),
+        },
+    };
+    let other_context = RequestContext {
+        id: UserContextId(other),
+        ..context
+    };
+    let history = json!([{"title":"Watched Evidence","products":["YouTube"],"titleUrl":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","time":"2026-10-01T08:00:00Z"}]);
+    let import = svc
+        .import_youtube_history(&context, history.clone(), true)
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(import["connection_id"].as_str().unwrap()).unwrap();
+    assert!(
+        svc.list_connections(&other_context)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(svc.disconnect(&other_context, id).await.is_err());
+    let second = svc
+        .import_youtube_history(&other_context, history, true)
+        .await
+        .unwrap();
+    assert_ne!(import["connection_id"], second["connection_id"]);
+    assert_eq!(svc.list_connections(&other_context).await.unwrap().len(), 1);
+    assert!(
+        svc.assistant_read(&context, "assistant", "youtube_history", 25)
+            .await
+            .is_err()
+    );
+    let agent:Uuid=sqlx::query_scalar("INSERT INTO agent_definitions(deployment_id,external_key,owner_user_context_id,requested_capability_categories) VALUES($1,'assistant',$2,ARRAY['*']) RETURNING id").bind(deployment).bind(user).fetch_one(&svc.pool).await.unwrap();
+    sqlx::query("INSERT INTO deployment_agent_selections VALUES($1,$2)")
+        .bind(deployment)
+        .bind(agent)
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    let grants = CapabilityGrantService::new(svc.pool.clone());
+    let _grant = grants
+        .grant(
+            &context,
+            CreateGrantRequest {
+                agent_external_key: "assistant".into(),
+                connection_id: id,
+                capability_external_key: "curated_youtube_history.read".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        svc.assistant_read(&context, "assistant", "youtube_history", 25)
+            .await
+            .is_ok()
+    );
+    assert!(
+        svc.assistant_read(&other_context, "assistant", "youtube_history", 25)
+            .await
+            .is_err()
+    );
+    svc.update_preferences(
+        &context,
+        id,
+        PreferencesRequest {
+            sync_timeline: None,
+            assistant_read: Some(false),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        svc.assistant_read(&context, "assistant", "youtube_history", 25)
+            .await
+            .is_err()
+    );
+    svc.update_preferences(
+        &context,
+        id,
+        PreferencesRequest {
+            sync_timeline: None,
+            assistant_read: Some(true),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        svc.assistant_read(&context, "assistant", "youtube_history", 25)
+            .await
+            .is_ok()
+    );
+    grants
+        .revoke(
+            &context,
+            CreateGrantRequest {
+                agent_external_key: "assistant".into(),
+                connection_id: id,
+                capability_external_key: "curated_youtube_history.read".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        svc.assistant_read(&context, "assistant", "youtube_history", 25)
+            .await
+            .is_err()
+    );
+    let forged = RequestContext {
+        user_id: UserId(Uuid::new_v4()),
+        ..context
+    };
+    assert!(svc.list_connections(&forged).await.is_err());
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn ambiguous_legacy_accounts_require_explicit_owned_reassociation() {
+    use crate::identity::{DeploymentId, RequestContext, RequestSubject, UserContextId, UserId};
+    let (svc, user, _) = fixture().await;
+    let deployment: Uuid =
+        sqlx::query_scalar("SELECT deployment_id FROM user_contexts WHERE id=$1")
+            .bind(user)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    let context = RequestContext {
+        id: UserContextId(user),
+        user_id: UserId(user),
+        subject: RequestSubject {
+            deployment_id: DeploymentId(deployment),
+        },
+    };
+    let cipher = svc
+        .cipher()
+        .unwrap()
+        .seal(format!("{user}:spotify").as_bytes(), "encrypted-original")
+        .unwrap();
+    let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,access_ciphertext,consented_at,failure_code) VALUES($1,'spotify',$2,now(),'scope_reassociation_required') RETURNING id").bind(user).bind(&cipher).fetch_one(&svc.pool).await.unwrap();
+    assert!(
+        !svc.list_connections(&context)
+            .await
+            .unwrap()
+            .iter()
+            .any(|c| c.id == id)
+    );
+    svc.reassociate(&context, id).await.unwrap();
+    assert!(
+        svc.list_connections(&context)
+            .await
+            .unwrap()
+            .iter()
+            .any(|c| c.id == id)
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<u8>>(
+            "SELECT access_ciphertext FROM vox_connections WHERE id=$1"
+        )
+        .bind(id)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap(),
+        cipher
+    );
+    assert!(svc.reassociate(&context, id).await.is_err());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM agent_capability_grants WHERE connection_id=$1"
+        )
+        .bind(id)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn crypto_compatibility_adapter_preserves_ciphertext_and_associated_data() {
+    let old =
+        crate::connected_apps::crypto::CredentialCipher::from_hex_key(&"ab".repeat(32)).unwrap();
+    let current = crate::crypto::CredentialCipher::from_hex_key(&"ab".repeat(32)).unwrap();
+    let aad = b"user:provider";
+    let legacy = old.seal(aad, "protected").unwrap();
+    assert_eq!(current.open(aad, &legacy).unwrap(), "protected");
+    let fresh = current.seal(aad, "protected").unwrap();
+    assert_eq!(old.open(aad, &fresh).unwrap(), "protected");
+    assert!(old.open(b"other:provider", &fresh).is_err());
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn standalone_curated_upgrade_preserves_ids_credentials_and_does_not_grant_access() {
+    let (svc, user, id) = fixture().await;
+    // Model the curated-only schema, keeping its original constraint name.
+    sqlx::raw_sql("DROP FUNCTION project_curated_connection() CASCADE; DROP FUNCTION revoke_curated_credentials() CASCADE; ALTER TABLE vox_connections DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connections DROP COLUMN credential_user_id; ALTER TABLE vox_connection_setups DROP COLUMN user_context_id CASCADE; ALTER TABLE vox_connections ADD CONSTRAINT vox_connections_user_connector_unique UNIQUE(user_id,connector_id);")
+        .execute(&svc.pool).await.unwrap();
+    let cipher = svc
+        .cipher()
+        .unwrap()
+        .seal(
+            format!("{user}:google_calendar").as_bytes(),
+            "retained-native-token",
+        )
+        .unwrap();
+    sqlx::query("UPDATE vox_connections SET access_ciphertext=$1 WHERE id=$2")
+        .bind(&cipher)
+        .bind(id)
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../schema/account-scope-upgrade.sql"))
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../schema/account-authority.sql"))
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    let row =
+        sqlx::query("SELECT id,user_context_id,access_ciphertext FROM vox_connections WHERE id=$1")
+            .bind(id)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    assert_eq!(row.get::<Uuid, _>("id"), id);
+    assert_eq!(row.get::<Uuid, _>("user_context_id"), user);
+    assert_eq!(row.get::<Vec<u8>, _>("access_ciphertext"), cipher);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM agent_capability_grants WHERE connection_id=$1"
+        )
+        .bind(id)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn credential_provenance_survives_owner_change_and_rotation() {
+    let (svc, context, _) = fixture().await;
+    let original = svc
+        .credential_aad(context, "google_calendar")
+        .await
+        .unwrap();
+    sqlx::query("UPDATE vox_connections SET credential_user_id=user_id WHERE user_context_id=$1")
+        .bind(context)
+        .execute(&svc.pool)
+        .await
+        .unwrap();
+    let new_owner: Uuid = sqlx::query_scalar("INSERT INTO users DEFAULT VALUES RETURNING id")
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap();
+    // Mirror the production merger's deferred composite ownership checks.
+    sqlx::raw_sql("ALTER TABLE vox_connections ALTER CONSTRAINT vox_connections_context_owner DEFERRABLE; ALTER TABLE vox_connection_setups ALTER CONSTRAINT vox_setups_context_owner DEFERRABLE;").execute(&svc.pool).await.unwrap();
+    let mut tx = svc.pool.begin().await.unwrap();
+    sqlx::query("SET CONSTRAINTS ALL DEFERRED")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE user_contexts SET user_id=$2 WHERE id=$1")
+        .bind(context)
+        .bind(new_owner)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE vox_connections SET user_id=$2,credential_generation=gen_random_uuid() WHERE user_context_id=$1").bind(context).bind(new_owner).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(
+        svc.credential_aad(context, "google_calendar")
+            .await
+            .unwrap(),
+        original
+    );
+    let encrypted = svc
+        .cipher()
+        .unwrap()
+        .seal(original.as_bytes(), "rotated-token")
+        .unwrap();
+    assert_eq!(
+        svc.cipher()
+            .unwrap()
+            .open(
+                svc.credential_aad(context, "google_calendar")
+                    .await
+                    .unwrap()
+                    .as_bytes(),
+                &encrypted
+            )
+            .unwrap(),
+        "rotated-token"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn maps_import_is_scoped_consented_and_requires_agent_grants() {
+    use crate::identity::{DeploymentId, RequestContext, RequestSubject, UserContextId, UserId};
+    let (svc, user, _) = fixture().await;
+    let deployment: Uuid =
+        sqlx::query_scalar("SELECT deployment_id FROM user_contexts WHERE id=$1")
+            .bind(user)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    let other: Uuid = sqlx::query_scalar(
+        "INSERT INTO user_contexts(deployment_id,user_id) VALUES($1,$2) RETURNING id",
+    )
+    .bind(deployment)
+    .bind(user)
+    .fetch_one(&svc.pool)
+    .await
+    .unwrap();
+    let context = RequestContext {
+        id: UserContextId(user),
+        user_id: UserId(user),
+        subject: RequestSubject {
+            deployment_id: DeploymentId(deployment),
+        },
+    };
+    let other_context = RequestContext {
+        id: UserContextId(other),
+        ..context
+    };
+    let history = json!([{"startTime":"2026-01-01T08:00:00Z","endTime":"2026-01-01T09:00:00Z","visit":{"topCandidate":{"placeId":"place","semanticType":"HOME","placeLocation":{"latLng":"geo:12.9,77.6"}}}}]);
+    assert!(
+        svc.import_maps_timeline(&context, history.clone(), false)
+            .await
+            .is_err()
+    );
+    let first = svc
+        .import_maps_timeline(&context, history.clone(), true)
+        .await
+        .unwrap();
+    let id = Uuid::parse_str(first["connection_id"].as_str().unwrap()).unwrap();
+    assert!(svc.read_personal_account(&other_context, id).await.is_err());
+    assert!(
+        svc.assistant_read(&context, "assistant", "maps_timeline", 25)
+            .await
+            .is_err()
+    );
+    let second = svc
+        .import_maps_timeline(&other_context, history, true)
+        .await
+        .unwrap();
+    assert_ne!(first["connection_id"], second["connection_id"]);
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn reimport_preserves_disabled_preferences_and_pauses_ingestion() {
+    let (svc, context, server, _) = personal_fixture().await;
+    let history = json!([{"title":"Watched Actual video","products":["YouTube"],"titleUrl":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","time":"2026-01-01T12:00:00Z"}]);
+    let first = svc
+        .import_youtube_history_in_context(context, history.clone(), true)
+        .await
+        .unwrap();
+    let id: Uuid = serde_json::from_value(first["connection_id"].clone()).unwrap();
+    svc.update_preferences_in_context(
+        context,
+        id,
+        PreferencesRequest {
+            sync_timeline: Some(false),
+            assistant_read: Some(false),
+        },
+    )
+    .await
+    .unwrap();
+    let changed = json!([{"title":"Watched New video","products":["YouTube"],"titleUrl":"https://www.youtube.com/watch?v=abcdefghijk","time":"2026-01-02T12:00:00Z"}]);
+    assert_eq!(
+        svc.import_youtube_history_in_context(context, changed, true)
+            .await
+            .unwrap()["imported"],
+        0
+    );
+    let row: (bool, bool) =
+        sqlx::query_as("SELECT sync_timeline,assistant_read FROM vox_connections WHERE id=$1")
+            .bind(id)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    assert_eq!(row, (false, false));
+    assert!(svc.read_personal_in_context(context, id).await.is_err());
+    server.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn oauth_relink_rotates_credentials_without_reenabling_preferences() {
+    let (mut svc, context, server, _) = personal_fixture().await;
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    svc.ingestor = std::sync::Arc::new(CountingIngestor(calls.clone()));
+    let mut id = None;
+    for _ in 0..2 {
+        let start = svc
+            .start_in_context(
+                context,
+                StartConnectionRequest {
+                    connector_id: "spotify".into(),
+                    consent: true,
+                    npsso: None,
+                },
+            )
+            .await
+            .unwrap();
+        let auth = url::Url::parse(start.authorization_url.as_ref().unwrap()).unwrap();
+        let state = auth
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let linked = svc
+            .handle_personal_callback("spotify", Some("accepted-code"), &state)
+            .await
+            .unwrap();
+        if let Some(old) = id {
+            assert_eq!(old, linked);
+            let prefs: (bool, bool) = sqlx::query_as(
+                "SELECT sync_timeline,assistant_read FROM vox_connections WHERE id=$1",
+            )
+            .bind(linked)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+            assert_eq!(prefs, (false, false));
+        } else {
+            id = Some(linked);
+            svc.update_preferences_in_context(
+                context,
+                linked,
+                PreferencesRequest {
+                    sync_timeline: Some(false),
+                    assistant_read: Some(false),
+                },
+            )
+            .await
+            .unwrap();
+        }
+    }
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "paused relink must not call the host ingestor"
+    );
+    server.abort();
+}
+
+struct RejectReassociation;
+#[async_trait::async_trait]
+impl TimelineIngestor for RejectReassociation {
+    async fn reassociate_history(
+        &self,
+        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _: Uuid,
+        _: Uuid,
+        _: Uuid,
+    ) -> Result<(), FreshConnectionError> {
+        Err(FreshConnectionError::Invalid(
+            "host history reassociation failed".into(),
+        ))
+    }
+    async fn calendar(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user: Uuid,
+        id: Uuid,
+        account: &str,
+        events: &[GoogleCalendarEvent],
+        min: DateTime<Utc>,
+        max: DateTime<Utc>,
+    ) -> Result<usize, FreshConnectionError> {
+        Ingestor
+            .calendar(tx, user, id, account, events, min, max)
+            .await
+    }
+    async fn gaming(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user: Uuid,
+        id: Uuid,
+        activities: &[ObservedActivity],
+    ) -> Result<usize, FreshConnectionError> {
+        Ingestor.gaming(tx, user, id, activities).await
+    }
+}
+#[tokio::test]
+#[ignore = "requires disposable CONNECTIONS_TEST_DATABASE_URL"]
+async fn host_history_failure_rolls_back_account_reassociation() {
+    let (mut svc, context, _) = fixture().await;
+    svc.ingestor = std::sync::Arc::new(RejectReassociation);
+    let deployment: Uuid =
+        sqlx::query_scalar("SELECT deployment_id FROM user_contexts WHERE id=$1")
+            .bind(context)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    let scope = crate::identity::RequestContext {
+        id: crate::identity::UserContextId(context),
+        user_id: crate::identity::UserId(context),
+        subject: crate::identity::RequestSubject {
+            deployment_id: crate::identity::DeploymentId(deployment),
+        },
+    };
+    let id:Uuid=sqlx::query_scalar("INSERT INTO vox_connections(user_id,connector_id,consented_at) VALUES($1,'spotify',now()) RETURNING id").bind(context).fetch_one(&svc.pool).await.unwrap();
+    assert!(svc.reassociate(&scope, id).await.is_err());
+    let stored: Option<Uuid> =
+        sqlx::query_scalar("SELECT user_context_id FROM vox_connections WHERE id=$1")
+            .bind(id)
+            .fetch_one(&svc.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, None);
+}
+
+struct CountingIngestor(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+#[async_trait::async_trait]
+impl TimelineIngestor for CountingIngestor {
+    async fn calendar(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user: Uuid,
+        id: Uuid,
+        account: &str,
+        events: &[GoogleCalendarEvent],
+        min: DateTime<Utc>,
+        max: DateTime<Utc>,
+    ) -> Result<usize, FreshConnectionError> {
+        Ingestor
+            .calendar(tx, user, id, account, events, min, max)
+            .await
+    }
+    async fn gaming(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user: Uuid,
+        id: Uuid,
+        activities: &[ObservedActivity],
+    ) -> Result<usize, FreshConnectionError> {
+        Ingestor.gaming(tx, user, id, activities).await
+    }
+    async fn personal_activity(
+        &self,
+        _: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _: Uuid,
+        _: Uuid,
+        _: &str,
+        _: &[crate::providers::personal::PersonalActivity],
+    ) -> Result<usize, FreshConnectionError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(0)
+    }
+    async fn food_order(
+        &self,
+        _: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _: Uuid,
+        _: Uuid,
+        _: &[crate::providers::food_delivery::FoodDeliveryOrder],
+    ) -> Result<usize, FreshConnectionError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(0)
+    }
+    fn food_committed(&self, _: Uuid, _: &[crate::providers::food_delivery::FoodDeliveryOrder]) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
