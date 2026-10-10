@@ -39,7 +39,7 @@ impl Client {
     }
     pub(crate) async fn register(&self, redirect: &str) -> Result<String, FoodDeliveryError> {
         let response = self.http.post(format!("{}/register", self.auth_base()))
-            .json(&json!({"client_name":"Vox", "redirect_uris":[redirect], "grant_types":["authorization_code","refresh_token"],
+            .json(&json!({"client_name":"Callvox", "redirect_uris":[redirect], "grant_types":["authorization_code","refresh_token"],
                 "response_types":["code"], "token_endpoint_auth_method":"none"}))
             .send().await.map_err(|_| FoodDeliveryError::Http("OAuth registration unavailable".into()))?;
         if !response.status().is_success() {

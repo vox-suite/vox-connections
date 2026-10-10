@@ -221,6 +221,14 @@ impl FreshConnectionsService {
                 auth_type: "npsso".to_string(),
                 available: self.cipher.is_some(),
             },
+            ConnectorDescriptor {
+                id: "gmail".to_string(),
+                name: "Gmail".to_string(),
+                description: "Live inbox monitoring for receipts, bills, and itineraries via push notifications.".to_string(),
+                supported_features: vec!["timeline_sync".to_string(), "assistant_read".to_string()],
+                auth_type: "oauth2".to_string(),
+                available: self.cipher.is_some() && self.google_client_id.is_some() && self.google_client_secret.is_some() && self.core_api_url.is_some(),
+            },
             self.swiggy_descriptor(),
             self.zomato_descriptor(),
         ];
@@ -324,6 +332,39 @@ impl FreshConnectionsService {
                     .bind(user_id).bind(&state_token).bind(verifier_cipher).bind(&redirect_uri).fetch_one(&mut *tx).await?;
                 tx.commit().await?;
                 let auth_url = build_auth_url(client_id, &redirect_uri, &state_token, &verifier);
+                Ok(StartConnectionResponse {
+                    setup_id: Some(setup_id),
+                    connection_id: None,
+                    authorization_url: Some(auth_url),
+                    status: "pending".to_string(),
+                })
+            }
+            "gmail" => {
+                let client_id = self.google_client_id.as_deref().ok_or_else(|| {
+                    FreshConnectionError::NotConfigured(
+                        "Google OAuth client ID is not configured".to_string(),
+                    )
+                })?;
+
+                let redirect_uri = self.google_redirect()?;
+                let state_token =
+                    crate::crypto::random_token().map_err(|_| FreshConnectionError::Crypto)?;
+                let verifier =
+                    crate::crypto::random_token().map_err(|_| FreshConnectionError::Crypto)?;
+                let verifier_cipher = self
+                    .cipher()?
+                    .seal(state_token.as_bytes(), &verifier)
+                    .map_err(|_| FreshConnectionError::Crypto)?;
+                let mut tx = self.pool.begin().await?;
+                sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+                    .bind(format!("setup:{user_id}:gmail"))
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("UPDATE vox_connection_setups SET status='cancelled', verifier_ciphertext=NULL WHERE user_id=$1 AND connector_id='gmail' AND status IN ('pending','exchanging')").bind(user_id).execute(&mut *tx).await?;
+                let setup_id = sqlx::query_scalar::<_, Uuid>("INSERT INTO vox_connection_setups(user_id,connector_id,state_token,verifier_ciphertext,redirect_uri,consented_at) VALUES($1,'gmail',$2,$3,$4,now()) RETURNING id")
+                    .bind(user_id).bind(&state_token).bind(verifier_cipher).bind(&redirect_uri).fetch_one(&mut *tx).await?;
+                tx.commit().await?;
+                let auth_url = crate::providers::gmail::build_auth_url(client_id, &redirect_uri, &state_token, &verifier);
                 Ok(StartConnectionResponse {
                     setup_id: Some(setup_id),
                     connection_id: None,
@@ -505,6 +546,13 @@ impl FreshConnectionsService {
                     spans_created: count,
                 })
             }
+            "gmail" => {
+                self.renew_gmail_watch(user_id, connection_id).await?;
+                Ok(RefreshResponse {
+                    refreshed: true,
+                    spans_created: 0,
+                })
+            }
             "playstation" => {
                 let count = self.sync_playstation(user_id, connection_id).await?;
                 Ok(RefreshResponse {
@@ -553,11 +601,37 @@ impl FreshConnectionsService {
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(connector) = connector {
+            if connector == "gmail" {
+                if let Ok(Some(row)) = sqlx::query("SELECT access_ciphertext, refresh_ciphertext FROM vox_connections WHERE id=$1 AND user_id=$2")
+                    .bind(connection_id)
+                    .bind(user_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                {
+                    let aad = format!("{user_id}:gmail");
+                    if let Ok(cipher) = self.cipher() {
+                        let access_cipher: Option<Vec<u8>> = row.get("access_ciphertext");
+                        let refresh_cipher: Option<Vec<u8>> = row.get("refresh_ciphertext");
+                        let gmail_client = crate::providers::gmail::GmailClient::new();
+                        if let Some(ac) = access_cipher {
+                            if let Ok(at) = cipher.open(aad.as_bytes(), &ac) {
+                                let _ = gmail_client.stop_watch(&at).await;
+                                let _ = gmail_client.revoke_token(&at).await;
+                            }
+                        }
+                        if let Some(rc) = refresh_cipher {
+                            if let Ok(rt) = cipher.open(aad.as_bytes(), &rc) {
+                                let _ = gmail_client.revoke_token(&rt).await;
+                            }
+                        }
+                    }
+                }
+            }
             sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
                 .bind(format!("setup:{user_id}:{connector}"))
                 .execute(&mut *tx)
                 .await?;
-            sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL,error='authorization_cancelled' WHERE user_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')").bind(user_id).bind(connector).execute(&mut *tx).await?;
+            sqlx::query("UPDATE vox_connection_setups SET status='cancelled',verifier_ciphertext=NULL,error='authorization_cancelled' WHERE user_id=$1 AND connector_id=$2 AND status IN ('pending','exchanging')").bind(user_id).bind(&connector).execute(&mut *tx).await?;
             sqlx::query("DELETE FROM vox_connections WHERE id=$1 AND user_id=$2")
                 .bind(connection_id)
                 .bind(user_id)
@@ -575,7 +649,7 @@ impl FreshConnectionsService {
         state: &str,
     ) -> Result<Uuid, FreshConnectionError> {
         let setup = sqlx::query(
-            "UPDATE vox_connection_setups SET status='exchanging' WHERE state_token = $1 AND status = 'pending' AND expires_at > now() RETURNING id, user_id, verifier_ciphertext, redirect_uri"
+            "UPDATE vox_connection_setups SET status='exchanging' WHERE state_token = $1 AND status = 'pending' AND expires_at > now() RETURNING id, user_id, connector_id, verifier_ciphertext, redirect_uri"
         )
         .bind(state)
         .fetch_optional(&self.pool)
@@ -583,7 +657,12 @@ impl FreshConnectionsService {
         .ok_or_else(|| FreshConnectionError::Invalid("Invalid or expired OAuth state token".to_string()))?;
 
         let setup_id: Uuid = setup.get("id");
-        let result = self.complete_google_callback(code, state, &setup).await;
+        let connector_id: String = setup.get("connector_id");
+        let result = if connector_id == "gmail" {
+            self.complete_gmail_callback(code, state, &setup).await
+        } else {
+            self.complete_google_callback(code, state, &setup).await
+        };
         if result.is_err() {
             sqlx::query("UPDATE vox_connection_setups SET status='failed',error='authorization_failed',verifier_ciphertext=NULL WHERE id=$1 AND status='exchanging'").bind(setup_id).execute(&self.pool).await?;
         }
@@ -712,6 +791,276 @@ impl FreshConnectionsService {
         let _ = self.refresh(user_id, connection_id).await;
 
         Ok(connection_id)
+    }
+
+    async fn complete_gmail_callback(
+        &self,
+        code: &str,
+        state: &str,
+        setup: &sqlx::postgres::PgRow,
+    ) -> Result<Uuid, FreshConnectionError> {
+        let setup_id: Uuid = setup.get("id");
+        let user_id: Uuid = setup.get("user_id");
+
+        let client_id = self.google_client_id.as_deref().ok_or_else(|| {
+            FreshConnectionError::NotConfigured("Google OAuth client ID missing".to_string())
+        })?;
+        let client_secret = self.google_client_secret.as_deref().ok_or_else(|| {
+            FreshConnectionError::NotConfigured("Google OAuth client secret missing".to_string())
+        })?;
+
+        let redirect_uri: String = setup.get("redirect_uri");
+        let verifier_bytes: Vec<u8> = setup.get("verifier_ciphertext");
+        let verifier = self
+            .cipher()?
+            .open(state.as_bytes(), &verifier_bytes)
+            .map_err(|_| FreshConnectionError::Crypto)?;
+
+        let gmail_client = crate::providers::gmail::GmailClient::new();
+        let tokens = gmail_client
+            .exchange_code(client_id, client_secret, &redirect_uri, code, &verifier)
+            .await
+            .map_err(|e| match e {
+                crate::providers::gmail::GmailError::Unauthorized => {
+                    FreshConnectionError::Unauthorized
+                }
+                _ => FreshConnectionError::Provider("Gmail token exchange failed".into()),
+            })?;
+
+        if tokens.refresh_token.is_none() {
+            return Err(FreshConnectionError::Unauthorized);
+        }
+
+        let profile = gmail_client
+            .get_profile(&tokens.access_token)
+            .await
+            .map_err(|e| match e {
+                crate::providers::gmail::GmailError::Unauthorized => {
+                    FreshConnectionError::Unauthorized
+                }
+                _ => FreshConnectionError::Provider("Gmail profile request failed".into()),
+            })?;
+
+        let aad = format!("{user_id}:gmail");
+        let access_cipher = self
+            .cipher()?
+            .seal(aad.as_bytes(), &tokens.access_token)
+            .map_err(|_| FreshConnectionError::Crypto)?;
+
+        let refresh_cipher = match tokens.refresh_token.as_deref() {
+            Some(rt) => Some(
+                self.cipher()?
+                    .seal(aad.as_bytes(), rt)
+                    .map_err(|_| FreshConnectionError::Crypto)?,
+            ),
+            None => None,
+        };
+
+        let access_expires_at = Utc::now() + Duration::seconds(tokens.expires_in);
+        let display = Some(profile.email_address.clone());
+
+        let metadata = json!({
+            "last_history_id": profile.history_id,
+            "baseline_history_id": profile.history_id,
+            "baseline_at": Utc::now(),
+            "email_address": profile.email_address,
+        });
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("setup:{user_id}:gmail"))
+            .execute(&mut *tx)
+            .await?;
+        let valid: Option<Uuid> = sqlx::query_scalar("SELECT id FROM vox_connection_setups WHERE id=$1 AND status='exchanging' AND expires_at>now() FOR UPDATE").bind(setup_id).fetch_optional(&mut *tx).await?;
+        if valid.is_none() {
+            return Err(FreshConnectionError::Invalid(
+                "Setup cancelled or expired".into(),
+            ));
+        }
+
+        let connection_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO vox_connections \
+             (user_id, connector_id, account_id, account_display_id, access_ciphertext, refresh_ciphertext, access_expires_at, \
+              authorization_state, sync_timeline, assistant_read, metadata, updated_at, consented_at) \
+             VALUES ($1, 'gmail', $2, $3, $4, $5, $6, 'authorized', true, true, $7, now(), now()) \
+             ON CONFLICT (user_id, connector_id) DO UPDATE SET \
+              generation = gen_random_uuid(), credential_generation=gen_random_uuid(), lease_token = NULL, lease_until = NULL, consented_at = now(), sync_timeline = true, assistant_read = true, \
+              account_id = EXCLUDED.account_id, \
+              account_display_id = EXCLUDED.account_display_id, \
+              access_ciphertext = EXCLUDED.access_ciphertext, \
+              refresh_ciphertext = EXCLUDED.refresh_ciphertext, \
+              access_expires_at = EXCLUDED.access_expires_at, \
+              authorization_state = 'authorized', next_sync_at=now(), metadata = EXCLUDED.metadata, last_synced_at=NULL, \
+              failure_code = NULL, \
+              failure_count = 0, \
+              updated_at = now() \
+             RETURNING id"
+        )
+        .bind(user_id)
+        .bind(&profile.email_address)
+        .bind(&display)
+        .bind(access_cipher)
+        .bind(refresh_cipher)
+        .bind(access_expires_at)
+        .bind(&metadata)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO connector_coverage \
+             (user_id, connector_id, connection_id, coverage_start, coverage_end, sync_mode, is_healthy, last_checked_at, metadata, updated_at) \
+             VALUES ($1, 'gmail', $2, now(), now(), 'live_push', true, now(), $3, now()) \
+             ON CONFLICT (user_id, connector_id) DO UPDATE SET \
+              connection_id = EXCLUDED.connection_id, \
+              sync_mode = EXCLUDED.sync_mode, \
+              is_healthy = true, \
+              last_checked_at = now(), \
+              metadata = EXCLUDED.metadata, \
+              updated_at = now()"
+        )
+        .bind(user_id)
+        .bind(connection_id)
+        .bind(&metadata)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "UPDATE vox_connection_setups SET status = 'authorized', verifier_ciphertext=NULL, connection_id = $1 WHERE id = $2"
+        )
+        .bind(connection_id)
+        .bind(setup_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let watch_meta = if let Some(topic) = std::env::var("GMAIL_PUBSUB_TOPIC").ok().filter(|topic| !topic.trim().is_empty()) {
+            match gmail_client.setup_watch(&tokens.access_token,topic.trim()).await {
+                Ok(watch) => json!({"watch_history_id":watch.history_id,"watch_expiration":watch.expiration,"watch_delivery_state":"active"}),
+                Err(_) => {
+                    tracing::warn!(%connection_id,"Gmail live watch registration failed");
+                    json!({"watch_delivery_state":"failed","watch_failure_code":"watch_registration_failed"})
+                }
+            }
+        } else { json!({"watch_delivery_state":"reconciliation_only","watch_failure_code":"watch_not_configured"}) };
+        sqlx::query("UPDATE vox_connections SET metadata=metadata || $1 WHERE id=$2 AND user_id=$3")
+            .bind(watch_meta).bind(connection_id).bind(user_id).execute(&mut *tx).await?;
+
+        tx.commit().await?;
+        Ok(connection_id)
+    }
+
+    pub async fn get_gmail_tokens(
+        &self,
+        user_id: Uuid,
+        connection_id: Uuid,
+    ) -> Result<crate::providers::gmail::GmailTokens, FreshConnectionError> {
+        let row = sqlx::query(
+            "SELECT access_ciphertext, refresh_ciphertext, access_expires_at FROM vox_connections WHERE id = $1 AND user_id = $2 AND connector_id = 'gmail' AND authorization_state = 'authorized'"
+        )
+        .bind(connection_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(FreshConnectionError::NotFound)?;
+
+        let cipher = self.cipher()?;
+        let aad = format!("{user_id}:gmail");
+        let access_cipher: Vec<u8> = row.get("access_ciphertext");
+        let refresh_cipher: Option<Vec<u8>> = row.get("refresh_ciphertext");
+        let access_expires_at: DateTime<Utc> = row.get("access_expires_at");
+
+        let current_access = cipher
+            .open(aad.as_bytes(), &access_cipher)
+            .map_err(|_| FreshConnectionError::Crypto)?;
+
+        if access_expires_at > Utc::now() + Duration::minutes(5) {
+            return Ok(crate::providers::gmail::GmailTokens {
+                access_token: current_access,
+                refresh_token: None,
+                expires_in: (access_expires_at - Utc::now()).num_seconds(),
+                scope: None,
+            });
+        }
+
+        let Some(rc) = refresh_cipher else {
+            return Ok(crate::providers::gmail::GmailTokens {
+                access_token: current_access,
+                refresh_token: None,
+                expires_in: 0,
+                scope: None,
+            });
+        };
+
+        let refresh_token = cipher
+            .open(aad.as_bytes(), &rc)
+            .map_err(|_| FreshConnectionError::Crypto)?;
+
+        let client_id = self.google_client_id.as_deref().ok_or_else(|| {
+            FreshConnectionError::NotConfigured("Google OAuth client ID missing".to_string())
+        })?;
+        let client_secret = self.google_client_secret.as_deref().ok_or_else(|| {
+            FreshConnectionError::NotConfigured("Google OAuth client secret missing".to_string())
+        })?;
+
+        let gmail_client = crate::providers::gmail::GmailClient::new();
+        let refreshed = gmail_client
+            .refresh_access_token(client_id, client_secret, &refresh_token)
+            .await
+            .map_err(|_| FreshConnectionError::Unauthorized)?;
+
+        let new_access_cipher = cipher
+            .seal(aad.as_bytes(), &refreshed.access_token)
+            .map_err(|_| FreshConnectionError::Crypto)?;
+        let new_expires_at = Utc::now() + Duration::seconds(refreshed.expires_in);
+
+        sqlx::query(
+            "UPDATE vox_connections SET access_ciphertext = $1, access_expires_at = $2, updated_at = now() WHERE id = $3 AND user_id = $4"
+        )
+        .bind(new_access_cipher)
+        .bind(new_expires_at)
+        .bind(connection_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(refreshed)
+    }
+
+    pub async fn renew_gmail_watch(
+        &self,
+        user_id: Uuid,
+        connection_id: Uuid,
+    ) -> Result<(), FreshConnectionError> {
+        let topic = std::env::var("GMAIL_PUBSUB_TOPIC")
+            .ok()
+            .filter(|t| !t.trim().is_empty());
+        let Some(topic_name) = topic else {
+            return Err(FreshConnectionError::Provider("Gmail live notification topic is not configured".into()));
+        };
+
+        let tokens = self.get_gmail_tokens(user_id, connection_id).await?;
+        let gmail_client = crate::providers::gmail::GmailClient::new();
+        let watch = gmail_client
+            .setup_watch(&tokens.access_token, &topic_name)
+            .await
+            .map_err(|e| FreshConnectionError::Provider(e.to_string()))?;
+
+        let meta = json!({
+            "watch_history_id": watch.history_id,
+            "watch_expiration": watch.expiration,
+            "watch_renewed_at": Utc::now(),
+            "watch_delivery_state":"active",
+        });
+
+        sqlx::query(
+            "UPDATE vox_connections SET metadata = metadata || $1, updated_at = now() WHERE id = $2 AND user_id = $3"
+        )
+        .bind(meta)
+        .bind(connection_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn sync_google_calendar(

@@ -1,4 +1,5 @@
 pub mod food_delivery;
+pub mod gmail;
 pub mod google_calendar;
 pub mod observations;
 pub mod playstation;
