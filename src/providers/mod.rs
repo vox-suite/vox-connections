@@ -5,7 +5,6 @@ pub mod observations;
 pub mod playstation;
 pub mod psn;
 pub mod swiggy;
-pub mod zomato;
 
 pub use food_delivery::*;
 

@@ -1,15 +1,14 @@
-# Swiggy and Zomato connections
+# Swiggy connection
 
-The food integrations use official MCP endpoints with per-user OAuth authorization. Browser cookies and demo credentials are no longer accepted as food-account authorization.
+The Swiggy integration uses the official MCP endpoint with per-user OAuth authorization. Browser cookies and demo credentials are no longer accepted as food-account authorization.
 
 ## Provider setup
 
-Swiggy is enabled by default and needs no feature flag. Its exact callback URL must be allowlisted by Swiggy. Zomato stays disabled until `ZOMATO_MCP_ENABLED=true` is set in both Core API and Worker environments after approval. `VOX_CREDENTIAL_KEY` for credential encryption and `VOX_CORE_API_URL` must also be configured.
+Swiggy is enabled by default and needs no feature flag. Its exact callback URL must be allowlisted by Swiggy. `VOX_CREDENTIAL_KEY` for credential encryption and `VOX_CORE_API_URL` must also be configured.
 
 Callback URLs:
 
 - `<VOX_CORE_API_URL>/v1/connectors/swiggy/callback`
-- `<VOX_CORE_API_URL>/v1/connectors/zomato/callback`
 
 Vox dynamically registers a public OAuth client, generates a unique state and S256 PKCE verifier, and encrypts setup credentials. The callback exchanges the authorization code and performs a real read before saving an authorized connection. Setup expires after 15 minutes and callbacks cannot be replayed. Restarted or cancelled setup cannot commit an in-flight authorization result.
 
@@ -17,13 +16,12 @@ Vox dynamically registers a public OAuth client, generates a unique state and S2
 
 Access tokens, refresh tokens, and expiry are stored per user using the existing authenticated encryption. Issued refresh tokens are exchanged automatically when access expiry is within 60 seconds, or once after an authorization failure. Rotated credentials are persisted under the existing connection lease and credential-generation fence before order reads; a later provider read failure does not discard the rotation. Network/provider failures retain authorization and release the lease for retry. Missing refresh tokens or revoked authorization require reconnecting in the browser.
 
-Swiggy's official authentication guide explicitly says refresh-token issuance is not implemented in v1.0, even though its metadata advertises the grant. Therefore automatic background renewal cannot currently be promised for Swiggy. Reauthorization may reuse the provider's longer-lived browser session, but Vox does not automate browser consent or OTP entry. Zomato metadata advertises the refresh grant; actual issuance and rotation still need a real approved-account test.
+Swiggy's official authentication guide explicitly says refresh-token issuance is not implemented in v1.0, even though its metadata advertises the grant. Therefore automatic background renewal cannot currently be promised for Swiggy. Reauthorization may reuse the provider's longer-lived browser session, but Vox does not automate browser consent or OTP entry.
 
 ## Real data and sync
 
 Swiggy reads `get_addresses` with pagination, then `get_food_orders` for saved addresses and `track_food_order` for active orders. These are read-only calls. No cart, payment, ordering, or cancellation tool is exposed by this integration. Returned order IDs are deduplicated without inventing sessions or events.
 
-Zomato discovers its authenticated tool catalogue and accepts only a supported history tool (`get_orders`, `get_order_history`, or `get_recent_orders`) with a read-only annotation and no required arguments. Its real tool name, input contract, and response schema have not yet been verified with developer access. If the catalogue does not expose that contract, linking fails explicitly rather than guessing a tool or reporting successful synchronization.
 
 Malformed history, non-JSON history, and provider errors are errors. A valid empty order array stays empty. No order, coordinate, amount, ETA, address, item, delivery status, or timestamp is fabricated. Original provider fields are retained for assistant reads. Unrecognized statuses and timestamps remain unknown; timeline spans are created only when an actual timestamp and recognized status are available. The assistant does not claim that the provider's recent-order list is complete historical coverage.
 
@@ -48,7 +46,5 @@ Before enabling real accounts, verify provider access, exact allowlisted callbac
 - [Swiggy food history schema](https://mcp.swiggy.com/builders/docs/reference/food/get_food_orders/)
 - [Swiggy food tracking schema](https://mcp.swiggy.com/builders/docs/reference/food/track_food_order/)
 - [Swiggy address pagination](https://mcp.swiggy.com/builders/docs/reference/food/get_addresses/)
-- [Zomato developer access and callback restrictions](https://github.com/Zomato/mcp-server-manifest)
 - Public authorization-server metadata was read directly from both official MCP hosts.
 
-The Zomato SVG uses the Simple Icons vector paths, with a flat brand-red rounded tile and a centered white wordmark. Source: [Simple Icons Zomato](https://github.com/simple-icons/simple-icons/blob/develop/icons/zomato.svg).

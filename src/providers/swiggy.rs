@@ -16,7 +16,6 @@ impl SwiggyClient {
         Self {
             client: Client::new(
                 http,
-                "swiggy",
                 "https://mcp.swiggy.com/food",
                 "https://mcp.swiggy.com/auth",
                 true,

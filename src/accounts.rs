@@ -151,7 +151,6 @@ pub struct FreshConnectionsService {
     google: GoogleClient,
     psn: crate::providers::psn::Client,
     pub(crate) swiggy: crate::providers::swiggy::SwiggyClient,
-    pub(crate) zomato: crate::providers::zomato::ZomatoClient,
     personal: crate::providers::personal::Client,
     ingestor: std::sync::Arc<dyn TimelineIngestor>,
     google_client_id: Option<String>,
@@ -185,11 +184,10 @@ impl FreshConnectionsService {
             psn: crate::providers::psn::Client::new().map_err(map_psn_error)?,
             swiggy: crate::providers::swiggy::SwiggyClient::new(http.clone()),
             personal: crate::providers::personal::Client::new(
-                http.clone(),
+                http,
                 google_client_id.clone(),
                 google_client_secret.clone(),
             ),
-            zomato: crate::providers::zomato::ZomatoClient::new(http),
             ingestor,
             google_client_id,
             google_client_secret,
@@ -230,7 +228,6 @@ impl FreshConnectionsService {
                 available: self.cipher.is_some() && self.google_client_id.is_some() && self.google_client_secret.is_some() && self.core_api_url.is_some(),
             },
             self.swiggy_descriptor(),
-            self.zomato_descriptor(),
         ];
         for (id, name, description) in [
             (
@@ -461,7 +458,7 @@ impl FreshConnectionsService {
                 })
             }
             "spotify" | "youtube" => self.start_personal_oauth(user_id, &req.connector_id).await,
-            "swiggy" | "zomato" => self.start_food_oauth(user_id, &req.connector_id).await,
+            "swiggy" => self.start_food_oauth(user_id, &req.connector_id).await,
             other => Err(FreshConnectionError::Invalid(format!(
                 "Unknown connector '{other}'"
             ))),
@@ -562,13 +559,6 @@ impl FreshConnectionsService {
             }
             "swiggy" => {
                 let count = self.sync_swiggy(user_id, connection_id).await?;
-                Ok(RefreshResponse {
-                    refreshed: true,
-                    spans_created: count,
-                })
-            }
-            "zomato" => {
-                let count = self.sync_zomato(user_id, connection_id).await?;
                 Ok(RefreshResponse {
                     refreshed: true,
                     spans_created: count,
@@ -1311,7 +1301,6 @@ impl FreshConnectionsService {
     ) -> Result<&crate::providers::food_delivery::Client, FreshConnectionError> {
         match connector {
             "swiggy" => Ok(&self.swiggy.client),
-            "zomato" => Ok(&self.zomato.client),
             _ => Err(FreshConnectionError::NotFound),
         }
     }
@@ -1674,7 +1663,7 @@ impl FreshConnectionsService {
         if matches!(connector, "spotify" | "youtube" | "youtube_history" | "maps_timeline") {
             return self.read_personal_claimed(user_id, id, conn).await;
         }
-        let mut items = if matches!(connector, "swiggy" | "zomato") {
+        let mut items = if matches!(connector, "swiggy") {
             serde_json::to_value(self.food_orders_claimed(user_id, connector, conn).await?)
                 .map_err(|_| FreshConnectionError::Provider("Invalid food response".into()))?
         } else {
@@ -1762,7 +1751,7 @@ impl FreshConnectionsService {
         let list = items
             .as_array_mut()
             .ok_or(FreshConnectionError::Invalid("Invalid response".into()))?;
-        let complete = list.len() <= limit && !matches!(connector, "swiggy" | "zomato");
+        let complete = list.len() <= limit && !matches!(connector, "swiggy");
         list.truncate(limit);
         let mut tx = self.pool.begin().await?;
         let valid:Option<Uuid>=sqlx::query_scalar("SELECT id FROM vox_connections WHERE id=$1 AND user_id=$2 AND generation=$3 AND lease_token=$4 AND lease_until>now() AND assistant_read AND authorization_state='authorized' FOR UPDATE").bind(id).bind(user_id).bind(conn.get::<Uuid,_>("generation")).bind(conn.get::<Uuid,_>("lease_token")).fetch_optional(&mut *tx).await?;
@@ -2152,7 +2141,7 @@ impl FreshConnectionsService {
     pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError> {
         let rows = sqlx::query(
             "SELECT id, user_id, connector_id FROM vox_connections \
-             WHERE authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() AND (lease_until IS NULL OR lease_until <= now()) AND connector_id IN ('google_calendar','playstation','swiggy','zomato','spotify','youtube') ORDER BY next_sync_at \
+             WHERE authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() AND (lease_until IS NULL OR lease_until <= now()) AND connector_id IN ('google_calendar','playstation','swiggy','spotify','youtube') ORDER BY next_sync_at \
              LIMIT 20",
         )
         .fetch_all(&self.pool)
@@ -2165,7 +2154,7 @@ impl FreshConnectionsService {
 
             let result = match connector_id.as_str() {
                 "google_calendar" => self.refresh(user_id, id).await.map(|_| ()),
-                "playstation" | "swiggy" | "zomato" | "spotify" | "youtube" => {
+                "playstation" | "swiggy" | "spotify" | "youtube" => {
                     self.refresh(user_id, id).await.map(|_| ())
                 }
                 _ => Ok(()),

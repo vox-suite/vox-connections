@@ -59,7 +59,6 @@ impl FoodDeliveryOrder {
     pub fn provider_label(&self) -> &'static str {
         match self.provider.as_str() {
             "swiggy" => super::swiggy::LABEL,
-            "zomato" => super::zomato::LABEL,
             _ => "Food delivery",
         }
     }
@@ -79,7 +78,6 @@ pub enum FoodDeliveryError {
 #[derive(Clone)]
 pub(crate) struct Client {
     pub(crate) http: reqwest::Client,
-    pub(crate) provider: &'static str,
     pub(crate) endpoint: String,
     pub(crate) auth_base: String,
     pub(crate) enabled: bool,
@@ -88,7 +86,6 @@ pub(crate) struct Client {
 impl Client {
     pub(crate) fn new(
         http: reqwest::Client,
-        provider: &'static str,
         endpoint: &str,
         auth_base: &str,
         enabled: bool,
@@ -96,7 +93,6 @@ impl Client {
     ) -> Self {
         Self {
             http,
-            provider,
             endpoint: endpoint.into(),
             auth_base: auth_base.into(),
             enabled,
@@ -108,11 +104,7 @@ impl Client {
         token: &str,
     ) -> Result<Vec<FoodDeliveryOrder>, FoodDeliveryError> {
         let mut session = Session::connect(self, token).await?;
-        let mut orders = if self.provider == "swiggy" {
-            super::swiggy::read_orders(&mut session).await?
-        } else {
-            super::zomato::read_orders(&mut session).await?
-        };
+        let mut orders = super::swiggy::read_orders(&mut session).await?;
         let mut seen = HashSet::new();
         orders.retain(|o| seen.insert(o.order_id.clone()));
         Ok(orders)
@@ -417,9 +409,6 @@ mod tests {
     fn parse_order_swiggy(v: &Value) -> Option<FoodDeliveryOrder> {
         parse_order(v, "swiggy")
     }
-    fn parse_order_zomato(v: &Value) -> Option<FoodDeliveryOrder> {
-        parse_order(v, "zomato")
-    }
 
     #[test]
     fn missing_coordinates_are_not_replaced_with_bengaluru() {
@@ -433,7 +422,7 @@ mod tests {
 
     #[test]
     fn missing_status_is_not_reported_as_delivered() {
-        let order = parse_order_zomato(&json!({
+        let order = parse_order_swiggy(&json!({
             "order_id":"123", "res_name":"Actual restaurant"
         }))
         .unwrap();
