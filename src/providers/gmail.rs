@@ -14,6 +14,8 @@ pub enum GmailError {
     Auth(String),
     #[error("token expired or unauthorized")]
     Unauthorized,
+    #[error("message no longer exists")]
+    NotFound,
     #[error("invalid response: {0}")]
     Invalid(String),
 }
@@ -99,7 +101,12 @@ impl Default for GmailClient {
 impl GmailClient {
     pub fn new() -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("valid Gmail HTTP client configuration"),
             token_url: "https://oauth2.googleapis.com/token".into(),
             profile_url: "https://gmail.googleapis.com/gmail/v1/users/me/profile".into(),
             messages_url: "https://gmail.googleapis.com/gmail/v1/users/me/messages".into(),
@@ -161,7 +168,9 @@ impl GmailClient {
             return Err(GmailError::Unauthorized);
         }
 
-        if !(1..=86400).contains(&parsed.expires_in.unwrap_or(3600)) || parsed.access_token.is_empty() {
+        if !(1..=86400).contains(&parsed.expires_in.unwrap_or(3600))
+            || parsed.access_token.is_empty()
+        {
             return Err(GmailError::Invalid("Invalid token response".into()));
         }
 
@@ -367,12 +376,7 @@ impl GmailClient {
                 url.push_str(pt);
             }
 
-            let res = self
-                .http
-                .get(&url)
-                .bearer_auth(access_token)
-                .send()
-                .await?;
+            let res = self.http.get(&url).bearer_auth(access_token).send().await?;
 
             if matches!(res.status().as_u16(), 401 | 403) {
                 return Err(GmailError::Unauthorized);
@@ -404,7 +408,9 @@ impl GmailClient {
                 for record in history_records {
                     if let Some(added) = record.get("messagesAdded").and_then(Value::as_array) {
                         for item in added {
-                            if let Some(msg_id) = item.pointer("/message/id").and_then(Value::as_str) {
+                            if let Some(msg_id) =
+                                item.pointer("/message/id").and_then(Value::as_str)
+                            {
                                 message_ids.push(msg_id.to_string());
                             }
                         }
@@ -435,21 +441,13 @@ impl GmailClient {
         let mut ids = Vec::new();
 
         loop {
-            let mut url = format!(
-                "{}?q=after:{}",
-                self.messages_url, after_timestamp_secs
-            );
+            let mut url = format!("{}?q=after:{}", self.messages_url, after_timestamp_secs);
             if let Some(ref pt) = page_token {
                 url.push_str("&pageToken=");
                 url.push_str(pt);
             }
 
-            let res = self
-                .http
-                .get(&url)
-                .bearer_auth(access_token)
-                .send()
-                .await?;
+            let res = self.http.get(&url).bearer_auth(access_token).send().await?;
 
             if matches!(res.status().as_u16(), 401 | 403) {
                 return Err(GmailError::Unauthorized);
@@ -491,15 +489,13 @@ impl GmailClient {
     ) -> Result<GmailMessageItem, GmailError> {
         let url = format!("{}/{}?format=full", self.messages_url, message_id);
 
-        let res = self
-            .http
-            .get(&url)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
+        let res = self.http.get(&url).bearer_auth(access_token).send().await?;
 
         if matches!(res.status().as_u16(), 401 | 403) {
             return Err(GmailError::Unauthorized);
+        }
+        if res.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(GmailError::NotFound);
         }
         if !res.status().is_success() {
             return Err(GmailError::Auth("Message request failed".into()));
@@ -510,8 +506,16 @@ impl GmailClient {
             .await
             .map_err(|e| GmailError::Invalid(e.to_string()))?;
 
-        let id = raw.get("id").and_then(Value::as_str).unwrap_or(message_id).to_string();
-        let thread_id = raw.get("threadId").and_then(Value::as_str).unwrap_or("").to_string();
+        let id = raw
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or(message_id)
+            .to_string();
+        let thread_id = raw
+            .get("threadId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let history_id = match raw.get("historyId") {
             Some(Value::Number(n)) => n.as_u64().unwrap_or(0),
             Some(Value::String(s)) => s.parse::<u64>().unwrap_or(0),
@@ -522,7 +526,10 @@ impl GmailClient {
             .and_then(Value::as_str)
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
-        let snippet = raw.get("snippet").and_then(Value::as_str).map(|s| s.to_string());
+        let snippet = raw
+            .get("snippet")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
 
         let mut from = None;
         let mut to = None;
@@ -578,12 +585,7 @@ impl GmailClient {
             self.messages_url, message_id, attachment_id
         );
 
-        let res = self
-            .http
-            .get(&url)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
+        let res = self.http.get(&url).bearer_auth(access_token).send().await?;
 
         if matches!(res.status().as_u16(), 401 | 403) {
             return Err(GmailError::Unauthorized);
@@ -640,7 +642,9 @@ fn extract_parts(
                     3 => format!("{sanitized}="),
                     _ => sanitized,
                 };
-                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(padded.as_bytes()) {
+                if let Ok(bytes) =
+                    base64::engine::general_purpose::STANDARD.decode(padded.as_bytes())
+                {
                     *body_text = Some(String::from_utf8_lossy(&bytes).to_string());
                 }
             }
@@ -651,5 +655,31 @@ fn extract_parts(
         for sub in subparts {
             extract_parts(sub, body_text, attachments);
         }
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn deleted_message_is_a_permanent_missing_result() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                axum::Router::new().fallback(|| async { axum::http::StatusCode::NOT_FOUND }),
+            )
+            .await
+            .unwrap();
+        });
+        let mut gmail = GmailClient::new();
+        gmail.messages_url = format!("http://{address}/messages");
+        assert!(matches!(
+            gmail.get_message("test", "deleted").await,
+            Err(GmailError::NotFound)
+        ));
+        task.abort();
     }
 }
