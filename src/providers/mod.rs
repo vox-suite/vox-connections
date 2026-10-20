@@ -11,3 +11,5 @@ pub use food_delivery::*;
 pub(crate) mod food_oauth;
 
 pub mod personal;
+
+pub mod steam;

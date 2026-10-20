@@ -1,3 +1,5 @@
+#[path = "steam_accounts.rs"]
+mod steam_accounts;
 use crate::{
     crypto::CredentialCipher,
     providers::{
@@ -152,6 +154,7 @@ pub struct FreshConnectionsService {
     psn: crate::providers::psn::Client,
     pub(crate) swiggy: crate::providers::swiggy::SwiggyClient,
     personal: crate::providers::personal::Client,
+    steam: crate::providers::steam::Client,
     ingestor: std::sync::Arc<dyn TimelineIngestor>,
     google_client_id: Option<String>,
     google_client_secret: Option<String>,
@@ -180,6 +183,7 @@ impl FreshConnectionsService {
         Ok(Self {
             pool,
             cipher,
+            steam: crate::providers::steam::Client::new(http.clone()),
             google: GoogleClient::new(http.clone()),
             psn: crate::providers::psn::Client::new().map_err(map_psn_error)?,
             swiggy: crate::providers::swiggy::SwiggyClient::new(http.clone()),
@@ -203,6 +207,7 @@ impl FreshConnectionsService {
 
     pub fn list_connectors(&self) -> Vec<ConnectorDescriptor> {
         let mut descriptors = vec![
+            ConnectorDescriptor { id: "steam".into(), name: "Steam".into(), description: "Game playtime on your timeline. Requires public Game details and playtime; exact session times are unavailable.".into(), supported_features: vec!["timeline_sync".into(), "assistant_read".into()], auth_type: "openid".into(), available: self.cipher.is_some() && self.core_api_url.is_some() && self.steam.enabled() },
             ConnectorDescriptor {
                 id: "google_calendar".to_string(),
                 name: "Google Calendar".to_string(),
@@ -303,6 +308,7 @@ impl FreshConnectionsService {
             ));
         }
         match req.connector_id.as_str() {
+            "steam" => self.start_steam(user_id).await,
             "google_calendar" => {
                 let client_id = self.google_client_id.as_deref().ok_or_else(|| {
                     FreshConnectionError::NotConfigured(
@@ -493,7 +499,7 @@ impl FreshConnectionsService {
         connection_id: Uuid,
         req: PreferencesRequest,
     ) -> Result<ConnectionItem, FreshConnectionError> {
-        let result = sqlx::query("UPDATE vox_connections SET sync_timeline=COALESCE($3,sync_timeline), assistant_read=COALESCE($4,assistant_read), generation=gen_random_uuid(), metadata=CASE WHEN $3=true AND NOT sync_timeline AND connector_id='playstation' THEN jsonb_set(metadata,'{baseline_required}','true') ELSE metadata END, next_sync_at=now(), updated_at=now() WHERE id=$1 AND user_id=$2")
+        let result = sqlx::query("UPDATE vox_connections SET sync_timeline=COALESCE($3,sync_timeline), assistant_read=COALESCE($4,assistant_read), generation=gen_random_uuid(), metadata=CASE WHEN $3=true AND NOT sync_timeline AND connector_id IN ('playstation','steam') THEN jsonb_set(metadata,'{baseline_required}','true') ELSE metadata END, next_sync_at=now(), updated_at=now() WHERE id=$1 AND user_id=$2")
             .bind(connection_id).bind(user_id).bind(req.sync_timeline).bind(req.assistant_read).execute(&self.pool).await?;
         if result.rows_affected() == 0 {
             return Err(FreshConnectionError::NotFound);
@@ -536,6 +542,10 @@ impl FreshConnectionsService {
 
         let connector_id: String = conn.get("connector_id");
         match connector_id.as_str() {
+            "steam" => Ok(RefreshResponse {
+                refreshed: true,
+                spans_created: self.sync_steam(user_id, connection_id).await?,
+            }),
             "google_calendar" => {
                 let count = self.sync_google_calendar(user_id, connection_id).await?;
                 Ok(RefreshResponse {
@@ -1660,7 +1670,13 @@ impl FreshConnectionsService {
     ) -> Result<Value, FreshConnectionError> {
         let id: Uuid = conn.get("id");
         let now = Utc::now();
-        if matches!(connector, "spotify" | "youtube" | "youtube_history" | "maps_timeline") {
+        if connector == "steam" {
+            return self.read_steam(user_id, id, limit, conn).await;
+        }
+        if matches!(
+            connector,
+            "spotify" | "youtube" | "youtube_history" | "maps_timeline"
+        ) {
             return self.read_personal_claimed(user_id, id, conn).await;
         }
         let mut items = if matches!(connector, "swiggy") {
@@ -2141,7 +2157,7 @@ impl FreshConnectionsService {
     pub async fn run_due_syncs(&self) -> Result<(), FreshConnectionError> {
         let rows = sqlx::query(
             "SELECT id, user_id, connector_id FROM vox_connections \
-             WHERE authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() AND (lease_until IS NULL OR lease_until <= now()) AND connector_id IN ('google_calendar','playstation','swiggy','spotify','youtube') ORDER BY next_sync_at \
+             WHERE authorization_state = 'authorized' AND sync_timeline AND next_sync_at <= now() AND (lease_until IS NULL OR lease_until <= now()) AND connector_id IN ('google_calendar','playstation','swiggy','spotify','youtube','steam') ORDER BY next_sync_at \
              LIMIT 20",
         )
         .fetch_all(&self.pool)
@@ -2154,7 +2170,7 @@ impl FreshConnectionsService {
 
             let result = match connector_id.as_str() {
                 "google_calendar" => self.refresh(user_id, id).await.map(|_| ()),
-                "playstation" | "swiggy" | "spotify" | "youtube" => {
+                "playstation" | "swiggy" | "spotify" | "youtube" | "steam" => {
                     self.refresh(user_id, id).await.map(|_| ())
                 }
                 _ => Ok(()),
